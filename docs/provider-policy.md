@@ -31,8 +31,9 @@ service. Host-mediated MCP keeps Antigravity as the official client and AgentBra
 ## Codex
 
 AgentBraid uses the documented non-interactive Codex CLI interface. Each user signs in through
-Codex directly. AgentBraid stores Codex thread identifiers and structured task output, not
-credentials.
+Codex directly. AgentBraid stores Codex thread identifiers and redacted structured task output,
+not credentials. The v0.1 child environment removes API-key variables, so users authenticate with
+an existing `codex login` session rather than asking AgentBraid to forward a key.
 
 Official references:
 
@@ -44,4 +45,3 @@ Official references:
 Provider behavior and terms can change. Review this file before each release. A policy change
 that invalidates an adapter is a security issue and may disable that adapter without a normal
 deprecation period.
-

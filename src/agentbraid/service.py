@@ -35,7 +35,9 @@ from agentbraid.models import (
 )
 from agentbraid.providers.base import StructuredProviderResult
 from agentbraid.providers.codex import CodexAdapter
+from agentbraid.redaction import redact_model, redact_text
 from agentbraid.router import TaskRouter
+from agentbraid.security import assert_safe_runtime_paths
 from agentbraid.store import StateStore
 from agentbraid.worktrees import WorktreeManager
 
@@ -77,6 +79,12 @@ class AgentBraidService:
     ) -> None:
         self.config = config
         self.workspace = workspace.expanduser().resolve()
+        assert_safe_runtime_paths(
+            self.workspace,
+            config.state_dir,
+            config.database_path,
+            config.worktree_dir,
+        )
         self.store = store or StateStore(config.database_path)
         self.codex = codex or CodexAdapter(config)
         self.router = router or TaskRouter()
@@ -86,13 +94,19 @@ class AgentBraidService:
     def from_workspace(cls, workspace: Path) -> AgentBraidService:
         resolved = workspace.expanduser().resolve()
         config = AgentBraidConfig.load(resolved)
+        assert_safe_runtime_paths(
+            resolved,
+            config.state_dir,
+            config.database_path,
+            config.worktree_dir,
+        )
         config.ensure_directories()
         return cls(config, resolved)
 
     async def start_run(self, request: StartRunRequest) -> RunSnapshot:
         _assert_not_child()
         self.worktrees.assert_clean_workspace()
-        normalized_request = self._normalize_request(request)
+        normalized_request = redact_model(self._normalize_request(request))
         run = self.store.create_run(normalized_request)
         self.store.begin_planning(run.run_id)
         model = self.config.codex_model or "codex-default"
@@ -150,7 +164,8 @@ class AgentBraidService:
         *,
         task_id: str | None = None,
     ) -> TaskState | None:
-        claimed = self.store.claim_host_task(run_id, host_id, task_id=task_id)
+        safe_host_id = redact_text(host_id)
+        claimed = self.store.claim_host_task(run_id, safe_host_id, task_id=task_id)
         if claimed is not None:
             run = self.store.get_run(run_id)
             integration_branch = _integration_branch(run)
@@ -177,10 +192,10 @@ class AgentBraidService:
                         summary="Host worktree could not be prepared.",
                         error=exc.message,
                     ),
-                    claimed_by=host_id,
+                    claimed_by=safe_host_id,
                 )
                 raise
-            self._touch_host_capability(run_id, host_id)
+            self._touch_host_capability(run_id, safe_host_id)
         return claimed
 
     async def submit_host_result(
@@ -190,10 +205,11 @@ class AgentBraidService:
         host_id: str,
         result: HostTaskResult,
     ) -> TaskState:
+        safe_host_id = redact_text(host_id)
         task = _task_by_id(self.store.get_run(run_id), task_id)
         if task.status != TaskStatus.RUNNING or task.executor != Executor.HOST:
             raise StateError(f"host task is not running: {run_id}/{task_id}")
-        if task.claimed_by != host_id:
+        if task.claimed_by != safe_host_id:
             raise StateError(f"host task is claimed by another worker: {run_id}/{task_id}")
         commit_sha = result.commit_sha
         if result.outcome == TaskOutcome.SUCCEEDED and task.spec.mutates_workspace:
@@ -225,7 +241,7 @@ class AgentBraidService:
             run_id,
             task_id,
             result,
-            claimed_by=host_id,
+            claimed_by=safe_host_id,
             worktree_path=task.worktree_path,
             commit_sha=commit_sha,
         )
@@ -253,7 +269,11 @@ class AgentBraidService:
     def list_capabilities(self) -> list[CapabilitySnapshot]:
         return self.store.list_capabilities()
 
-    def apply_run(self, run_id: str) -> ApplyRunResult:
+    def apply_run(self, run_id: str, confirmation: str) -> ApplyRunResult:
+        if confirmation != "apply-reviewed-run":
+            raise SecurityBoundaryError(
+                "apply_run requires the explicit confirmation phrase: apply-reviewed-run"
+            )
         run = self.store.get_run(run_id)
         if run.request.delivery_mode != DeliveryMode.INTEGRATION_BRANCH:
             raise StateError("report-only runs cannot be applied to the primary workspace")

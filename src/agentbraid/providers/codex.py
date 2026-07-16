@@ -31,6 +31,8 @@ from agentbraid.providers.base import (
     ProviderUsage,
     StructuredProviderResult,
 )
+from agentbraid.redaction import redact_text, redact_value
+from agentbraid.security import assert_codex_binary, sanitized_provider_environment
 
 _OUTPUT_CHUNK_BYTES = 64 * 1024
 _ERROR_DETAIL_BYTES = 12_000
@@ -53,6 +55,7 @@ class CodexAdapter:
     """Structured adapter for the documented non-interactive Codex CLI."""
 
     def __init__(self, config: AgentBraidConfig) -> None:
+        assert_codex_binary(config.codex_binary)
         self.config = config
 
     async def plan(
@@ -143,9 +146,7 @@ class CodexAdapter:
                 output_path=output_path,
                 resume_thread_id=resume_thread_id,
             )
-            environment = os.environ.copy()
-            environment["AGENTBRAID_CHILD"] = "1"
-            environment["NO_COLOR"] = "1"
+            environment = sanitized_provider_environment(os.environ.copy())
 
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -208,9 +209,9 @@ class CodexAdapter:
             output=output,
             thread_id=thread_id,
             usage=_usage(events),
-            events=tuple(events),
+            events=tuple(redact_value(event) for event in events),
             duration_seconds=monotonic() - started_at,
-            stderr=stderr.decode(errors="replace"),
+            stderr=redact_text(stderr.decode(errors="replace")),
         )
 
     def _command(

@@ -264,3 +264,45 @@ def test_events_record_run_and_task_transitions(tmp_path: Path) -> None:
         "task.result_submitted",
         "run.status_changed",
     ]
+
+
+def test_persisted_prompts_results_and_events_are_redacted(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "agentbraid.db")
+    created = store.create_run(StartRunRequest(goal="Inspect with token=top-secret-value"))
+    store.begin_planning(created.run_id)
+    task, route = make_task("redact")
+    redacted_task = task.model_copy(
+        update={"instructions": "Do not log password=task-secret-value"}
+    )
+    store.save_plan(
+        created.run_id,
+        RunPlan(
+            summary="Redact sensitive values.",
+            tasks=[redacted_task],
+            final_acceptance_criteria=["No secret is persisted."],
+        ),
+        {"redact": route},
+    )
+    assert store.claim_host_task(created.run_id, "token=host-secret-value") is not None
+    store.submit_task_result(
+        created.run_id,
+        "redact",
+        WorkerResult(
+            outcome=TaskOutcome.SUCCEEDED,
+            summary="Completed with authorization=result-secret-value",
+        ),
+        claimed_by="token=host-secret-value",
+    )
+
+    snapshot_json = store.get_run(created.run_id).model_dump_json()
+    events_json = str(store.list_events(created.run_id))
+
+    for secret in (
+        "top-secret-value",
+        "task-secret-value",
+        "host-secret-value",
+        "result-secret-value",
+    ):
+        assert secret not in snapshot_json
+        assert secret not in events_json
+    assert "[REDACTED]" in snapshot_json

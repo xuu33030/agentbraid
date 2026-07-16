@@ -65,3 +65,12 @@ def test_config_rejects_non_positive_limits(
 
     with pytest.raises(ConfigurationError, match="must be positive"):
         AgentBraidConfig.load()
+
+
+def test_config_rejects_host_cli_as_codex_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTBRAID_CODEX_BINARY", "agy")
+
+    with pytest.raises(ConfigurationError, match="official codex executable"):
+        AgentBraidConfig.load()

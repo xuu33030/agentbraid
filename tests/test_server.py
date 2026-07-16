@@ -15,7 +15,7 @@ from agentbraid.service import AgentBraidService
 
 @pytest.mark.asyncio
 async def test_server_exposes_versioned_host_run_lifecycle(tmp_path: Path) -> None:
-    state_dir = tmp_path / "state"
+    state_dir = tmp_path.parent / f"{tmp_path.name}-state"
     config = AgentBraidConfig(
         state_dir=state_dir,
         database_path=state_dir / "agentbraid.db",
@@ -39,6 +39,11 @@ async def test_server_exposes_versioned_host_run_lifecycle(tmp_path: Path) -> No
     assert "request" in start_tool.inputSchema["properties"]
     submit_tool = next(tool for tool in tools if tool.name == "submit_host_result")
     assert "result" in submit_tool.inputSchema["properties"]
+    apply_tool = next(tool for tool in tools if tool.name == "apply_run")
+    assert apply_tool.annotations is not None
+    assert apply_tool.annotations.destructiveHint is True
+    confirmation_schema = apply_tool.inputSchema["properties"]["confirmation"]
+    assert confirmation_schema["const"] == "apply-reviewed-run"
 
 
 @pytest.mark.asyncio
@@ -50,7 +55,7 @@ async def test_stdio_server_completes_mcp_handshake(tmp_path: Path) -> None:
     }
     environment.pop("AGENTBRAID_CHILD", None)
     environment["AGENTBRAID_WORKSPACE"] = str(tmp_path)
-    environment["AGENTBRAID_STATE_DIR"] = str(tmp_path / "state")
+    environment["AGENTBRAID_STATE_DIR"] = str(tmp_path.parent / f"{tmp_path.name}-stdio-state")
     parameters = StdioServerParameters(
         command=sys.executable,
         args=["-m", "agentbraid", "serve"],

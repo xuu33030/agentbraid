@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agentbraid.errors import WorktreeConflictError, WorktreeError
+from agentbraid.redaction import redact_text
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MAX_GIT_DETAIL = 20_000
@@ -128,7 +129,7 @@ class WorktreeManager:
         if not status:
             raise WorktreeError(f"mutating task produced no changes: {task_id}")
         self._git(["add", "--all"], cwd=resolved)
-        message_title = " ".join(title.split())[:72] or task_id
+        message_title = redact_text(" ".join(title.split()))[:72] or task_id
         self._git(
             [
                 "-c",

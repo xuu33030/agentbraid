@@ -32,3 +32,5 @@ AgentBraid must never:
 - run mutating worker tasks outside an explicit workspace
 - push, deploy, or destroy worktrees without an explicit caller action
 
+The implemented runtime controls, environment scrubbing, redaction scope, path restrictions, and
+delivery gate are documented in [`docs/security-boundaries.md`](docs/security-boundaries.md).

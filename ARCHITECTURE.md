@@ -65,6 +65,8 @@ pending -> ready -> running -> succeeded
 - AgentBraid passes goals and task context, never raw authentication material.
 - Child workers receive a recursion marker and cannot create nested AgentBraid runs.
 - Pushes, deployments, and destructive cleanup require an explicit caller action.
+- Provider child environments are credential-scrubbed, persisted strings are redacted, and
+  runtime paths cannot target credential-bearing directories. See `docs/security-boundaries.md`.
 
 ## Public compatibility
 

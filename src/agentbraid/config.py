@@ -9,6 +9,7 @@ from typing import Any
 from platformdirs import user_state_path
 
 from agentbraid.errors import ConfigurationError
+from agentbraid.security import is_codex_binary
 
 
 def _positive_int(value: object, name: str) -> int:
@@ -93,6 +94,11 @@ class AgentBraidConfig:
                 normalized[name] = _positive_int(value, name)
             elif name == "codex_model":
                 normalized[name] = str(value).strip() or None
+            elif name == "codex_binary":
+                binary = str(value).strip()
+                if not is_codex_binary(binary):
+                    raise ConfigurationError("codex_binary must name the official codex executable")
+                normalized[name] = binary
             else:
                 normalized[name] = str(value)
         return replace(self, **normalized)

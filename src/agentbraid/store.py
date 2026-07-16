@@ -33,6 +33,7 @@ from agentbraid.models import (
     WorkerResult,
     utc_now,
 )
+from agentbraid.redaction import redact_model, redact_text, redact_value
 
 SCHEMA_VERSION = 1
 
@@ -208,6 +209,7 @@ class StateStore:
         run_id: str | None = None,
     ) -> RunSnapshot:
         identifier = run_id or uuid4().hex
+        request = redact_model(request)
         now = utc_now()
         with self._transaction() as connection:
             try:
@@ -257,6 +259,7 @@ class StateStore:
         lead_thread_id: str | None = None,
         integration_branch: str | None = None,
     ) -> RunSnapshot:
+        plan = redact_model(plan)
         task_ids = {task.task_id for task in plan.tasks}
         assignment_ids = set(assignments)
         if task_ids != assignment_ids:
@@ -309,7 +312,7 @@ class StateStore:
                         task.model_dump_json(),
                         TaskStatus.PENDING.value,
                         decision.executor.value,
-                        decision.rationale,
+                        redact_text(decision.rationale),
                         _dump_datetime(now),
                         _dump_datetime(now),
                     ),
@@ -361,7 +364,13 @@ class StateStore:
                     error = ?, updated_at = ?
                 WHERE run_id = ?
                 """,
-                (status.value, final_summary, error, _dump_datetime(now), run_id),
+                (
+                    status.value,
+                    redact_text(final_summary) if final_summary is not None else None,
+                    redact_text(error) if error is not None else None,
+                    _dump_datetime(now),
+                    run_id,
+                ),
             )
             self._append_event(
                 connection,
@@ -399,6 +408,7 @@ class StateStore:
         *,
         task_id: str | None = None,
     ) -> TaskState | None:
+        claimed_by = redact_text(claimed_by)
         if not claimed_by.strip():
             raise StateError("claimant cannot be empty")
         now = utc_now()
@@ -476,6 +486,8 @@ class StateStore:
         commit_sha: str | None = None,
     ) -> TaskState:
         now = utc_now()
+        result = redact_model(result)
+        claimed_by = redact_text(claimed_by) if claimed_by is not None else None
         with self._transaction(immediate=True) as connection:
             self._get_run_row(connection, run_id)
             row = self._get_task_row(connection, run_id, task_id)
@@ -607,6 +619,7 @@ class StateStore:
         return self.get_run(run_id)
 
     def upsert_capability(self, capability: CapabilitySnapshot) -> CapabilitySnapshot:
+        capability = redact_model(capability)
         total_latency = capability.average_latency_seconds * (
             capability.successes + capability.failures
         )
@@ -972,7 +985,7 @@ class StateStore:
                 run_id,
                 task_id,
                 event_type,
-                json.dumps(payload, sort_keys=True),
+                json.dumps(redact_value(dict(payload)), sort_keys=True),
                 _dump_datetime(created_at),
             ),
         )

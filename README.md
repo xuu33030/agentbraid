@@ -34,7 +34,8 @@ AgentBraid MCP server
 ```
 
 AgentBraid never launches `agy`, reads Antigravity credentials, or proxies Google account
-access. See [`docs/provider-policy.md`](docs/provider-policy.md) for the supported boundary.
+access. See [`docs/provider-policy.md`](docs/provider-policy.md) and
+[`docs/security-boundaries.md`](docs/security-boundaries.md) for the supported boundary.
 
 ## Quick start
 
@@ -80,4 +81,3 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 AgentBraid is an independent open-source project. It is not affiliated with, endorsed by, or
 sponsored by OpenAI or Google.
-

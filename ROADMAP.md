@@ -11,7 +11,7 @@ provider interfaces or policies change.
 - [x] Antigravity host-mediated plugin
 - [x] Task DAG and capability routing
 - [x] Git worktree integration
-- [ ] Provider-policy and security guards
+- [x] Provider-policy and security guards
 - [ ] Cross-platform CI and packaging
 - [ ] Documentation and examples
 - [ ] Alpha release readiness

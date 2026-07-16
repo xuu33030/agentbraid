@@ -63,7 +63,7 @@ def config(tmp_path: Path, *, max_output_bytes: int = 100_000) -> AgentBraidConf
         state_dir=tmp_path / "state",
         database_path=tmp_path / "state" / "agentbraid.db",
         worktree_dir=tmp_path / "state" / "worktrees",
-        codex_binary="codex-test",
+        codex_binary="codex",
         codex_model="gpt-test",
         codex_timeout_seconds=5,
         max_output_bytes=max_output_bytes,
@@ -103,6 +103,9 @@ async def test_plan_invokes_structured_read_only_codex(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-secret-value")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-secret-value")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret-value")
     process = FakeProcess(
         jsonl(
             {"type": "thread.started", "thread_id": "thread-123"},
@@ -136,10 +139,14 @@ async def test_plan_invokes_structured_read_only_codex(
     assert result.thread_id == "thread-123"
     assert result.usage.input_tokens == 100
     assert result.usage.cached_input_tokens == 40
-    assert invocation["args"][:3] == ("codex-test", "exec", "--json")
+    assert invocation["args"][:3] == ("codex", "exec", "--json")
     assert "read-only" in invocation["args"]
     assert invocation["kwargs"]["cwd"] == tmp_path
     assert invocation["kwargs"]["env"]["AGENTBRAID_CHILD"] == "1"
+    assert "GOOGLE_API_KEY" not in invocation["kwargs"]["env"]
+    assert "GITHUB_TOKEN" not in invocation["kwargs"]["env"]
+    assert "OPENAI_API_KEY" not in invocation["kwargs"]["env"]
+    assert "HOME" in invocation["kwargs"]["env"]
     assert b"Inspect this repository." in process.stdin.payload
     assert process.stdin.closed is True
 
@@ -168,7 +175,7 @@ async def test_resume_uses_existing_thread_when_stream_omits_thread_event(
     )
 
     assert result.thread_id == "thread-existing"
-    assert invocation["args"][:4] == ("codex-test", "exec", "resume", "--json")
+    assert invocation["args"][:4] == ("codex", "exec", "resume", "--json")
     assert invocation["args"][-2:] == ("thread-existing", "-")
 
 

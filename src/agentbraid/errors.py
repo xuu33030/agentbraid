@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from agentbraid.redaction import redact_text
+
 
 class AgentBraidError(Exception):
     """Base exception with a stable machine-readable code."""
@@ -7,9 +9,10 @@ class AgentBraidError(Exception):
     code = "agentbraid_error"
 
     def __init__(self, message: str, *, detail: str | None = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.detail = detail
+        safe_message = redact_text(message)
+        super().__init__(safe_message)
+        self.message = safe_message
+        self.detail = redact_text(detail) if detail is not None else None
 
     def as_dict(self) -> dict[str, str]:
         payload = {"code": self.code, "message": self.message}
