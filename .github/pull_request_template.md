@@ -1,28 +1,30 @@
 ## Summary
 
-<!-- What changed and why? -->
+<!-- What changed, and why is this the smallest appropriate change? -->
 
-## Related issue
+## Linked issue
 
-<!-- Use `Closes #123` when this PR should close an issue. -->
+Closes #
 
 ## Validation
 
-- [ ] Tests added or updated where behavior changed
-- [ ] `pytest` passes
-- [ ] `ruff check .` passes
-- [ ] `ruff format --check .` passes
-- [ ] `mypy` passes
+<!-- List exact commands and results. -->
 
-## Safety and provider policy
+- [ ] Focused tests pass
+- [ ] Ruff lint and format checks pass
+- [ ] Strict mypy checks pass
+- [ ] Broader tests or package checks pass when relevant
 
-- [ ] This change does not read, proxy, or share provider credentials
-- [ ] This change does not launch Antigravity as a background worker
-- [ ] New command execution is bounded to an explicit workspace
-- [ ] Provider-policy implications are documented, or this change has none
+## Security and providers
+
+- [ ] No credentials, runtime databases, private transcripts, or machine-specific paths are added
+- [ ] Provider authentication and policy boundaries are unchanged or explicitly documented
+- [ ] Mutating behavior remains workspace-scoped and remote delivery remains explicit
+- [ ] New dependencies pass vulnerability and license review
 
 ## Contribution
 
-- [ ] Every commit includes a DCO `Signed-off-by` line
-- [ ] No runtime database, worktree, credential, or model transcript is committed
-
+- [ ] The change is focused and linked to an accepted issue when required
+- [ ] Documentation and examples are updated
+- [ ] Every commit includes a DCO `Signed-off-by` trailer
+- [ ] I have reviewed the final diff
