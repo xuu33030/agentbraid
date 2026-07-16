@@ -27,7 +27,8 @@ resumed for integration decisions and final review.
 ### Codex workers
 
 Execute bounded tasks in per-task worktrees. A successful mutating task must return validation
-evidence and a local commit SHA.
+evidence and a local commit SHA. Branch naming, conflict recovery, and explicit delivery are
+documented in `docs/worktrees.md`.
 
 ### Scheduler
 

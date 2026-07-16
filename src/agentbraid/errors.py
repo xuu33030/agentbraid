@@ -72,3 +72,7 @@ class RoutingError(AgentBraidError):
 
 class WorktreeError(AgentBraidError):
     code = "worktree_error"
+
+
+class WorktreeConflictError(WorktreeError):
+    code = "worktree_conflict"

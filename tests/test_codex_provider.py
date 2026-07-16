@@ -9,7 +9,7 @@ import pytest
 
 from agentbraid.config import AgentBraidConfig
 from agentbraid.errors import ProviderOutputError, ProviderUnavailableError
-from agentbraid.models import RunPlan, StartRunRequest
+from agentbraid.models import RunPlan, StartRunRequest, TaskKind, TaskSpec, WorkerResult
 from agentbraid.providers.codex import CodexAdapter, _classify_failure, _parse_jsonl
 
 
@@ -210,6 +210,59 @@ async def test_empty_stream_auth_failure_is_classified(
         )
 
     assert raised.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_mutating_worker_uses_workspace_write_without_committing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = FakeProcess(
+        jsonl(
+            {"type": "thread.started", "thread_id": "worker-thread"},
+            {"type": "turn.completed"},
+        )
+    )
+    invocation: dict[str, Any] = {}
+
+    async def create_process(*args: str, **kwargs: Any) -> FakeProcess:
+        invocation["args"] = args
+        output_index = args.index("--output-last-message") + 1
+        Path(args[output_index]).write_text(
+            json.dumps(
+                {
+                    "outcome": "succeeded",
+                    "summary": "Worker completed the task.",
+                    "changed_files": ["feature.py"],
+                    "validations": [{"command": "pytest -q", "passed": True, "output": "passed"}],
+                    "notes": [],
+                    "confidence": 0.9,
+                    "error": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    task = TaskSpec(
+        task_id="worker-task",
+        title="Implement feature",
+        instructions="Implement and validate the feature.",
+        kind=TaskKind.IMPLEMENTATION,
+        mutates_workspace=True,
+        acceptance_criteria=["Tests pass."],
+    )
+
+    result = await CodexAdapter(config(tmp_path)).execute_task(
+        task,
+        tmp_path,
+        run_id="run-test",
+    )
+
+    assert isinstance(result.output, WorkerResult)
+    assert "workspace-write" in invocation["args"]
+    assert b"do not create a Git commit" in process.stdin.payload
 
 
 def test_invalid_jsonl_is_rejected() -> None:

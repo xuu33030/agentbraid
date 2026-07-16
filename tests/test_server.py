@@ -33,6 +33,7 @@ async def test_server_exposes_versioned_host_run_lifecycle(tmp_path: Path) -> No
         "get_run",
         "cancel_run",
         "list_capabilities",
+        "apply_run",
     }
     start_tool = next(tool for tool in tools if tool.name == "start_run")
     assert "request" in start_tool.inputSchema["properties"]

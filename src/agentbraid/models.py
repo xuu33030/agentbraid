@@ -217,6 +217,33 @@ class CapabilityStatus(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class ReviewSeverity(StrEnum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class ReviewFinding(StrictModel):
+    severity: ReviewSeverity
+    title: str = Field(min_length=1, max_length=200)
+    detail: str = Field(min_length=1, max_length=5000)
+    task_id: TaskId | None = None
+
+
+class RunReview(StrictModel):
+    approved: bool
+    summary: str = Field(min_length=1, max_length=10_000)
+    findings: list[ReviewFinding] = Field(default_factory=list, max_length=100)
+    validations: list[ValidationEvidence] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_approval(self) -> RunReview:
+        has_error = any(finding.severity == ReviewSeverity.ERROR for finding in self.findings)
+        if self.approved and has_error:
+            raise ValueError("an approved review cannot contain error findings")
+        return self
+
+
 class CapabilitySnapshot(StrictModel):
     executor: Executor
     model: str
@@ -227,3 +254,10 @@ class CapabilitySnapshot(StrictModel):
     cooldown_until: datetime | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ApplyRunResult(StrictModel):
+    run_id: str
+    integration_branch: str
+    commit_sha: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    applied_at: datetime = Field(default_factory=utc_now)

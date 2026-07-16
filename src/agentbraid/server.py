@@ -5,7 +5,13 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from agentbraid.models import HostTaskResult, RunSnapshot, StartRunRequest, TaskState
+from agentbraid.models import (
+    ApplyRunResult,
+    HostTaskResult,
+    RunSnapshot,
+    StartRunRequest,
+    TaskState,
+)
 from agentbraid.service import AgentBraidService, _assert_not_child
 
 
@@ -33,14 +39,14 @@ def create_server(service: AgentBraidService) -> FastMCP[None]:
         return service.claim_host_task(run_id, host_id, task_id=task_id)
 
     @server.tool(structured_output=True)
-    def submit_host_result(
+    async def submit_host_result(
         run_id: str,
         task_id: str,
         result: HostTaskResult,
         host_id: str = "antigravity-host",
     ) -> TaskState:
         """Submit the typed result and evidence for a claimed host task."""
-        return service.submit_host_result(run_id, task_id, host_id, result)
+        return await service.submit_host_result(run_id, task_id, host_id, result)
 
     @server.tool(structured_output=True)
     def get_run(run_id: str) -> RunSnapshot:
@@ -56,6 +62,11 @@ def create_server(service: AgentBraidService) -> FastMCP[None]:
     def list_capabilities() -> list[dict[str, object]]:
         """List observed Codex and host capability health without credentials."""
         return [capability.model_dump(mode="json") for capability in service.list_capabilities()]
+
+    @server.tool(structured_output=True)
+    def apply_run(run_id: str) -> ApplyRunResult:
+        """Explicitly fast-forward the primary workspace to a completed integration branch."""
+        return service.apply_run(run_id)
 
     return server
 

@@ -3,7 +3,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentbraid.models import RunPlan, TaskKind, TaskSpec
+from agentbraid.models import (
+    ReviewFinding,
+    ReviewSeverity,
+    RunPlan,
+    RunReview,
+    TaskKind,
+    TaskSpec,
+)
 
 
 def task(task_id: str, *, dependencies: list[str] | None = None) -> TaskSpec:
@@ -52,3 +59,18 @@ def test_run_plan_rejects_cycle() -> None:
 def test_run_plan_rejects_duplicate_task_ids() -> None:
     with pytest.raises(ValidationError, match="task IDs must be unique"):
         plan(task("build"), task("build"))
+
+
+def test_approved_review_rejects_error_findings() -> None:
+    with pytest.raises(ValidationError, match="cannot contain error findings"):
+        RunReview(
+            approved=True,
+            summary="This review is internally inconsistent.",
+            findings=[
+                ReviewFinding(
+                    severity=ReviewSeverity.ERROR,
+                    title="Regression",
+                    detail="A blocking regression remains.",
+                )
+            ],
+        )

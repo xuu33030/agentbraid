@@ -10,7 +10,7 @@ provider interfaces or policies change.
 - [x] Codex lead session adapter
 - [x] Antigravity host-mediated plugin
 - [x] Task DAG and capability routing
-- [ ] Git worktree integration
+- [x] Git worktree integration
 - [ ] Provider-policy and security guards
 - [ ] Cross-platform CI and packaging
 - [ ] Documentation and examples

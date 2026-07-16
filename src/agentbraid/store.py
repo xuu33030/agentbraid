@@ -428,7 +428,7 @@ class StateStore:
                 """
                 UPDATE tasks
                 SET status = ?, attempt = ?, claimed_by = ?, result_json = NULL,
-                    result_kind = NULL, error = NULL, updated_at = ?
+                    result_kind = NULL, commit_sha = NULL, error = NULL, updated_at = ?
                 WHERE run_id = ? AND task_id = ? AND status = ?
                 """,
                 (
@@ -545,6 +545,33 @@ class StateStore:
             self._sync_run_from_tasks(connection, run_id, now)
             updated = self._get_task_row(connection, run_id, task_id)
             return self._task_state(updated)
+
+    def set_task_worktree(self, run_id: str, task_id: str, path: Path) -> TaskState:
+        now = utc_now()
+        with self._transaction() as connection:
+            self._get_run_row(connection, run_id)
+            row = self._get_task_row(connection, run_id, task_id)
+            status = TaskStatus(row["status"])
+            if status != TaskStatus.RUNNING:
+                raise InvalidTransitionError(
+                    f"cannot assign a worktree while task is {status.value}"
+                )
+            connection.execute(
+                """
+                UPDATE tasks SET worktree_path = ?, updated_at = ?
+                WHERE run_id = ? AND task_id = ?
+                """,
+                (str(path), _dump_datetime(now), run_id, task_id),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                "task.worktree_assigned",
+                {"path": str(path)},
+                task_id=task_id,
+                created_at=now,
+            )
+            return self._task_state(self._get_task_row(connection, run_id, task_id))
 
     def cancel_run(self, run_id: str) -> RunSnapshot:
         now = utc_now()
@@ -707,6 +734,23 @@ class StateStore:
             }
             for row in rows
         ]
+
+    def record_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: Mapping[str, object],
+    ) -> None:
+        now = utc_now()
+        with self._transaction() as connection:
+            self._get_run_row(connection, run_id)
+            self._append_event(
+                connection,
+                run_id,
+                event_type,
+                payload,
+                created_at=now,
+            )
 
     def _get_run_row(self, connection: sqlite3.Connection, run_id: str) -> sqlite3.Row:
         row = connection.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
