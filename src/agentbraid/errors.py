@@ -66,5 +66,9 @@ class SecurityBoundaryError(AgentBraidError):
     code = "security_boundary_error"
 
 
+class RoutingError(AgentBraidError):
+    code = "routing_error"
+
+
 class WorktreeError(AgentBraidError):
     code = "worktree_error"

@@ -32,7 +32,8 @@ evidence and a local commit SHA.
 ### Scheduler
 
 Selects `codex` or `host` using task fit, historical outcomes, availability, latency, and risk.
-The scoring policy is deterministic and its rationale is stored with the assignment.
+The scoring policy is deterministic and its rationale is stored with the assignment. The fixed
+v0.1 weights and hard availability rules are documented in `docs/routing.md`.
 
 ### State store
 
@@ -68,4 +69,3 @@ pending -> ready -> running -> succeeded
 
 MCP schemas are versioned independently from the package. During alpha, incompatible schema
 changes are allowed when documented in `CHANGELOG.md`.
-

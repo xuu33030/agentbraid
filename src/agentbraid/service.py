@@ -5,14 +5,13 @@ from pathlib import Path
 from typing import Protocol
 
 from agentbraid.config import AgentBraidConfig
-from agentbraid.errors import ProviderError, SecurityBoundaryError, StateError
+from agentbraid.errors import ProviderError, RoutingError, SecurityBoundaryError, StateError
 from agentbraid.models import (
     CapabilitySnapshot,
     CapabilityStatus,
     DeliveryMode,
     Executor,
     HostTaskResult,
-    RoutingDecision,
     RunPlan,
     RunSnapshot,
     RunStatus,
@@ -23,6 +22,7 @@ from agentbraid.models import (
 )
 from agentbraid.providers.base import StructuredProviderResult
 from agentbraid.providers.codex import CodexAdapter
+from agentbraid.router import TaskRouter
 from agentbraid.store import StateStore
 
 
@@ -44,11 +44,13 @@ class AgentBraidService:
         *,
         store: StateStore | None = None,
         codex: LeadPlanner | None = None,
+        router: TaskRouter | None = None,
     ) -> None:
         self.config = config
         self.workspace = workspace.expanduser().resolve()
         self.store = store or StateStore(config.database_path)
         self.codex = codex or CodexAdapter(config)
+        self.router = router or TaskRouter()
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> AgentBraidService:
@@ -65,10 +67,19 @@ class AgentBraidService:
         model = self.config.codex_model or "codex-default"
         try:
             planning = await self.codex.plan(normalized_request, self.workspace)
-            assignments = {
-                task.task_id: _initial_assignment(task.preferred_executor)
-                for task in planning.output.tasks
-            }
+            self.store.record_capability_result(
+                Executor.CODEX,
+                model,
+                succeeded=True,
+                latency_seconds=planning.duration_seconds,
+                status=CapabilityStatus.HEALTHY,
+            )
+            assignments = self.router.route_plan(
+                planning.output,
+                self.store.list_capabilities(),
+                codex_model=model,
+                host_model=normalized_request.host_model,
+            )
             integration_branch = (
                 f"agentbraid/{run.run_id[:12]}"
                 if normalized_request.delivery_mode == DeliveryMode.INTEGRATION_BRANCH
@@ -94,13 +105,9 @@ class AgentBraidService:
             )
             self.store.set_run_status(run.run_id, RunStatus.FAILED, error=exc.message)
             raise
-        self.store.record_capability_result(
-            Executor.CODEX,
-            model,
-            succeeded=True,
-            latency_seconds=planning.duration_seconds,
-            status=CapabilityStatus.HEALTHY,
-        )
+        except RoutingError as exc:
+            self.store.set_run_status(run.run_id, RunStatus.BLOCKED, error=exc.message)
+            raise
         return snapshot
 
     def claim_host_task(
@@ -179,16 +186,6 @@ class AgentBraidService:
                     detail=f"configured={self.workspace}, requested={requested.resolve()}",
                 )
         return request.model_copy(update={"workspace": str(self.workspace)})
-
-
-def _initial_assignment(preferred: Executor | None) -> RoutingDecision:
-    executor = preferred or Executor.CODEX
-    rationale = (
-        f"The lead explicitly preferred {executor.value}."
-        if preferred is not None
-        else "No executor preference was supplied; Codex is the conservative default."
-    )
-    return RoutingDecision(executor=executor, score=1.0 if preferred else 0.5, rationale=rationale)
 
 
 def _assert_not_child() -> None:
