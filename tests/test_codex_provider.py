@@ -106,6 +106,7 @@ async def test_plan_invokes_structured_read_only_codex(
     monkeypatch.setenv("GOOGLE_API_KEY", "google-secret-value")
     monkeypatch.setenv("GITHUB_TOKEN", "github-secret-value")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-secret-value")
+    monkeypatch.setenv("AGENTBRAID_TEST_CONTEXT", "safe-value")
     process = FakeProcess(
         jsonl(
             {"type": "thread.started", "thread_id": "thread-123"},
@@ -146,7 +147,7 @@ async def test_plan_invokes_structured_read_only_codex(
     assert "GOOGLE_API_KEY" not in invocation["kwargs"]["env"]
     assert "GITHUB_TOKEN" not in invocation["kwargs"]["env"]
     assert "OPENAI_API_KEY" not in invocation["kwargs"]["env"]
-    assert "HOME" in invocation["kwargs"]["env"]
+    assert invocation["kwargs"]["env"]["AGENTBRAID_TEST_CONTEXT"] == "safe-value"
     assert b"Inspect this repository." in process.stdin.payload
     assert process.stdin.closed is True
 
