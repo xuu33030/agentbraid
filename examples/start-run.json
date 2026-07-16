@@ -1,0 +1,11 @@
+{
+  "request": {
+    "goal": "Add a tested health endpoint without changing authentication.",
+    "host_model": "antigravity-auto",
+    "constraints": [
+      "Do not push or deploy.",
+      "Preserve the existing public API except for the new endpoint."
+    ],
+    "delivery_mode": "integration_branch"
+  }
+}

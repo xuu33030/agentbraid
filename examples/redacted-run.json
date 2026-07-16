@@ -1,0 +1,167 @@
+{
+  "run_id": "run-demo-redacted",
+  "request": {
+    "goal": "Add a documented health endpoint without changing authentication. [REDACTED]",
+    "workspace": "/workspace/REDACTED/sample-app",
+    "host_model": "antigravity-auto",
+    "constraints": [
+      "Do not push or deploy.",
+      "Keep existing API behavior unchanged."
+    ],
+    "delivery_mode": "integration_branch"
+  },
+  "status": "completed",
+  "plan": {
+    "schema_version": "1.0",
+    "summary": "Inspect the API, then implement and document a bounded health endpoint.",
+    "tasks": [
+      {
+        "task_id": "inspect-api",
+        "title": "Inspect the current API conventions",
+        "instructions": "Identify the existing route, response, test, and documentation patterns without changing files.",
+        "kind": "exploration",
+        "preferred_executor": "codex",
+        "mutates_workspace": false,
+        "dependencies": [],
+        "acceptance_criteria": [
+          "Report the route registration and response conventions.",
+          "Identify the narrow test and documentation locations."
+        ],
+        "required_capabilities": [],
+        "risk": "low",
+        "complexity": 1,
+        "max_attempts": 2
+      },
+      {
+        "task_id": "implement-health",
+        "title": "Implement and document the health endpoint",
+        "instructions": "Add the endpoint using the discovered conventions, add focused tests, and update API documentation without touching authentication.",
+        "kind": "implementation",
+        "preferred_executor": "host",
+        "mutates_workspace": true,
+        "dependencies": [
+          "inspect-api"
+        ],
+        "acceptance_criteria": [
+          "The health endpoint follows the existing response format.",
+          "Focused tests pass.",
+          "Public API documentation describes the endpoint."
+        ],
+        "required_capabilities": [],
+        "risk": "medium",
+        "complexity": 2,
+        "max_attempts": 2
+      }
+    ],
+    "final_acceptance_criteria": [
+      "The endpoint is tested and documented.",
+      "Authentication behavior is unchanged.",
+      "No remote delivery occurred."
+    ]
+  },
+  "lead_thread_id": "thread_REDACTED",
+  "integration_branch": "agentbraid/integration/run-demo-red",
+  "final_summary": "Approved: the bounded endpoint, tests, and documentation satisfy the run criteria.",
+  "error": null,
+  "tasks": [
+    {
+      "run_id": "run-demo-redacted",
+      "spec": {
+        "task_id": "inspect-api",
+        "title": "Inspect the current API conventions",
+        "instructions": "Identify the existing route, response, test, and documentation patterns without changing files.",
+        "kind": "exploration",
+        "preferred_executor": "codex",
+        "mutates_workspace": false,
+        "dependencies": [],
+        "acceptance_criteria": [
+          "Report the route registration and response conventions.",
+          "Identify the narrow test and documentation locations."
+        ],
+        "required_capabilities": [],
+        "risk": "low",
+        "complexity": 1,
+        "max_attempts": 2
+      },
+      "status": "succeeded",
+      "executor": "codex",
+      "assignment_rationale": "codex selected: exploration fit, lead preference, low risk, and healthy availability.",
+      "attempt": 1,
+      "claimed_by": "agentbraid-codex-worker",
+      "result": {
+        "outcome": "succeeded",
+        "summary": "Located the route registry, response helper, focused test module, and API documentation.",
+        "changed_files": [],
+        "validations": [],
+        "notes": [
+          "Read-only task; no files changed."
+        ],
+        "confidence": 0.93,
+        "error": null
+      },
+      "worktree_path": "/home/REDACTED/.local/state/agentbraid/worktrees/run-demo-redacted/integration",
+      "commit_sha": null,
+      "error": null,
+      "created_at": "2026-07-16T08:00:02Z",
+      "updated_at": "2026-07-16T08:00:20Z"
+    },
+    {
+      "run_id": "run-demo-redacted",
+      "spec": {
+        "task_id": "implement-health",
+        "title": "Implement and document the health endpoint",
+        "instructions": "Add the endpoint using the discovered conventions, add focused tests, and update API documentation without touching authentication.",
+        "kind": "implementation",
+        "preferred_executor": "host",
+        "mutates_workspace": true,
+        "dependencies": [
+          "inspect-api"
+        ],
+        "acceptance_criteria": [
+          "The health endpoint follows the existing response format.",
+          "Focused tests pass.",
+          "Public API documentation describes the endpoint."
+        ],
+        "required_capabilities": [],
+        "risk": "medium",
+        "complexity": 2,
+        "max_attempts": 2
+      },
+      "status": "succeeded",
+      "executor": "host",
+      "assignment_rationale": "host selected: implementation preference, moderate complexity, healthy availability, and bounded workspace mutation.",
+      "attempt": 1,
+      "claimed_by": "antigravity-host",
+      "result": {
+        "outcome": "succeeded",
+        "summary": "Implemented and documented the health endpoint.",
+        "changed_files": [
+          "src/sample_app/health.py",
+          "tests/test_health.py",
+          "docs/api.md"
+        ],
+        "validations": [
+          {
+            "command": "python -m pytest tests/test_health.py -q",
+            "passed": true,
+            "output": "2 passed"
+          }
+        ],
+        "notes": [
+          "No authentication code was changed."
+        ],
+        "confidence": 0.95,
+        "error": null,
+        "commit_sha": "1111111111111111111111111111111111111111",
+        "artifacts": []
+      },
+      "worktree_path": "/home/REDACTED/.local/state/agentbraid/worktrees/run-demo-redacted/tasks/implement-health",
+      "commit_sha": "1111111111111111111111111111111111111111",
+      "error": null,
+      "created_at": "2026-07-16T08:00:02Z",
+      "updated_at": "2026-07-16T08:01:15Z"
+    }
+  ],
+  "created_at": "2026-07-16T08:00:00Z",
+  "updated_at": "2026-07-16T08:01:40Z"
+}

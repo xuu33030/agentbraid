@@ -13,7 +13,7 @@ provider interfaces or policies change.
 - [x] Git worktree integration
 - [x] Provider-policy and security guards
 - [x] Cross-platform CI and packaging
-- [ ] Documentation and examples
+- [x] Documentation and examples
 - [ ] Alpha release readiness
 
 ## After v0.1

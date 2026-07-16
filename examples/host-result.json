@@ -1,0 +1,28 @@
+{
+  "run_id": "run-demo-redacted",
+  "task_id": "implement-health",
+  "host_id": "antigravity-host",
+  "result": {
+    "outcome": "succeeded",
+    "summary": "Implemented and documented the health endpoint.",
+    "changed_files": [
+      "src/sample_app/health.py",
+      "tests/test_health.py",
+      "docs/api.md"
+    ],
+    "validations": [
+      {
+        "command": "python -m pytest tests/test_health.py -q",
+        "passed": true,
+        "output": "2 passed"
+      }
+    ],
+    "notes": [
+      "No authentication code was changed."
+    ],
+    "confidence": 0.95,
+    "error": null,
+    "commit_sha": "1111111111111111111111111111111111111111",
+    "artifacts": []
+  }
+}
