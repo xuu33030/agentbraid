@@ -12,7 +12,7 @@ provider interfaces or policies change.
 - [x] Task DAG and capability routing
 - [x] Git worktree integration
 - [x] Provider-policy and security guards
-- [ ] Cross-platform CI and packaging
+- [x] Cross-platform CI and packaging
 - [ ] Documentation and examples
 - [ ] Alpha release readiness
 
