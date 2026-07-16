@@ -19,22 +19,20 @@ for Antigravity as the user-facing host and Codex CLI as the background engineer
 
 ## Architecture
 
-```text
-User
-  |
-  v
-Official MCP host (Antigravity CLI in v0.1)
-  |
-  v
-AgentBraid MCP server
-  |
-  +-- Codex lead: plan, route, integrate, review
-  +-- Codex workers: isolated worktrees
-  +-- Host tasks: claimed and reported by the MCP host
+```mermaid
+flowchart LR
+    user["User"] --> host["Antigravity CLI<br/>official MCP host"]
+    host <-->|"workspace MCP over stdio"| braid["AgentBraid"]
+    braid --> codex["Codex CLI<br/>lead and workers"]
+    braid --> state["SQLite state<br/>outside repository"]
+    braid --> git["Git integration branch<br/>and isolated worktrees"]
+    host -->|"claimed host task"| git
 ```
 
 AgentBraid never launches `agy`, reads Antigravity credentials, or proxies Google account
-access. See [`docs/provider-policy.md`](docs/provider-policy.md) for the supported boundary.
+access. See [`docs/provider-policy.md`](docs/provider-policy.md) and
+[`docs/security-boundaries.md`](docs/security-boundaries.md) for the supported boundary.
+The detailed component and sequence diagrams are in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Quick start
 
@@ -42,27 +40,55 @@ Prerequisites:
 
 - Python 3.11+
 - Git 2.35+
-- Codex CLI signed in with the user's own account
-- An MCP-compatible host
+- Codex CLI on `PATH`, signed in with `codex login`
+- Antigravity CLI signed in with the user's own account
+- A clean target Git repository
 
 ```bash
+git clone https://github.com/xuu33030/agentbraid.git
+cd agentbraid
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev]'
+python -m pip install .
 
-agentbraid doctor
+cd /path/to/your/git-repository
+agentbraid doctor .
 agentbraid init .
-agentbraid serve
+agy
 ```
 
-On Windows PowerShell, activate the environment with `.venv\Scripts\Activate.ps1`.
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` and use a Windows path for
+the target repository. Keep the virtual environment: the generated MCP configuration records its
+absolute Python interpreter.
 
-For Antigravity CLI, `agentbraid init` writes a workspace-scoped MCP configuration and the
-AgentBraid skill under `.agents/`. Restart the host, then invoke `/agentbraid` with a goal.
+Inside Antigravity, use `/mcp` to confirm the `agentbraid` server is connected, `/skills` to
+confirm the workspace skill is loaded, then start with a bounded goal such as:
+
+```text
+/agentbraid Add a tested health endpoint. Do not change authentication, push, or deploy.
+```
+
+`agentbraid init` writes `.agents/mcp_config.json` and
+`.agents/skills/agentbraid/SKILL.md`. AgentBraid produces a reviewed local integration branch;
+updating the current branch remains a separate, explicit `apply_run` action.
+
+For complete platform instructions and the MCP tool sequence, read
+[`docs/getting-started.md`](docs/getting-started.md) and
+[`docs/host-walkthrough.md`](docs/host-walkthrough.md).
+
+## Documentation
+
+- [`docs/getting-started.md`](docs/getting-started.md): installation, workspace setup, and first run
+- [`docs/host-walkthrough.md`](docs/host-walkthrough.md): host task protocol and MCP tool reference
+- [`docs/sample-run.md`](docs/sample-run.md): redacted, schema-valid run transcript
+- [`docs/troubleshooting.md`](docs/troubleshooting.md): common setup, task, Git, and quota failures
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): components, lifecycle, trust boundaries, and diagrams
+- [`docs/routing.md`](docs/routing.md): deterministic assignment policy
+- [`docs/worktrees.md`](docs/worktrees.md): isolation, integration, review, and local apply
 
 ## Development status
 
-The [`v0.1.0-alpha` roadmap](ROADMAP.md) tracks public implementation work. Contributions are
+The [`v0.1.0 Alpha roadmap`](ROADMAP.md) tracks public implementation work. Contributions are
 welcome through issue-first pull requests; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Security and provider terms
@@ -80,4 +106,3 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 AgentBraid is an independent open-source project. It is not affiliated with, endorsed by, or
 sponsored by OpenAI or Google.
-

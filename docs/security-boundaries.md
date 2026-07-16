@@ -1,0 +1,47 @@
+# Security boundaries
+
+AgentBraid treats user goals, repository files, model output, command output, and MCP arguments as
+untrusted input. Its v0.1 controls reduce accidental credential exposure and prevent models from
+silently delivering changes outside the reviewed local workflow.
+
+## Provider processes
+
+- AgentBraid can launch only an executable whose basename is `codex` (or `codex.exe`) through the
+  Codex adapter. It never uses a shell to construct provider or Git commands.
+- The Codex child environment removes variables whose names indicate keys, tokens, credentials,
+  passwords, authorization material, JWTs, or secrets. This includes Google, Antigravity,
+  GitHub, cloud-provider, OpenAI, and Codex API-key variables.
+- Codex authentication for v0.1 therefore uses the user's existing `codex login` session. Raw API
+  keys are not forwarded by AgentBraid.
+- Every child receives `AGENTBRAID_CHILD=1`; a nested AgentBraid server or run fails closed.
+- AgentBraid never launches `agy` and never reads Antigravity or Google credential storage.
+
+## Filesystem and Git
+
+- The configured workspace cannot be a known credential-bearing directory such as `.ssh`,
+  `.gnupg`, `.aws`, `.codex`, `.gemini`, or the Google Cloud configuration directory.
+- Runtime state, the SQLite database, and managed worktrees must live outside the workspace and
+  outside those credential directories.
+- Mutating tasks run only in managed Git worktrees. Submitted commits must be the assigned task
+  branch `HEAD`, contain a DCO signoff, and contain no merge commits.
+- Integration conflicts restore the prior integration commit. Failed worktrees remain available
+  for local recovery; AgentBraid does not destructively clean them up.
+
+## Persistence and logs
+
+Before prompts, structured results, event payloads, capability metadata, error details, and commit
+titles are persisted or surfaced, AgentBraid redacts common secret assignments, bearer tokens,
+credential-bearing URLs, known provider-token prefixes, JWTs, and private-key blocks. Raw Codex
+JSONL events are not stored.
+
+Redaction is defense in depth, not a secret manager. Users must not place real credentials in
+goals, repositories, task results, or bug reports.
+
+## Delivery
+
+- Final task success produces a local integration branch, not a push or deployment.
+- The Codex lead must approve a read-only final review before the run can be delivered.
+- `apply_run` is marked destructive in MCP metadata, accepts only integration-delivery runs, and
+  requires the literal confirmation `apply-reviewed-run`.
+- Apply performs only a local `git merge --ff-only`. AgentBraid has no automatic push or deploy
+  path.

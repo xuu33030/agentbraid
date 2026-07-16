@@ -5,15 +5,15 @@ provider interfaces or policies change.
 
 ## v0.1.0 Alpha
 
-- [ ] Repository scaffold and governance
-- [ ] MCP contracts and durable SQLite state
-- [ ] Codex lead session adapter
-- [ ] Antigravity host-mediated plugin
-- [ ] Task DAG and capability routing
-- [ ] Git worktree integration
-- [ ] Provider-policy and security guards
-- [ ] Cross-platform CI and packaging
-- [ ] Documentation and examples
+- [x] Repository scaffold and governance
+- [x] MCP contracts and durable SQLite state
+- [x] Codex lead session adapter
+- [x] Antigravity host-mediated plugin
+- [x] Task DAG and capability routing
+- [x] Git worktree integration
+- [x] Provider-policy and security guards
+- [x] Cross-platform CI and packaging
+- [x] Documentation and examples
 - [ ] Alpha release readiness
 
 ## After v0.1
@@ -31,4 +31,3 @@ provider interfaces or policies change.
 - Sharing one user's subscription with other users
 - Hosted multi-tenant orchestration
 - Automatic push, deployment, or production mutation
-
