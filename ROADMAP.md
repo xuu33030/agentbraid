@@ -14,7 +14,7 @@ provider interfaces or policies change.
 - [x] Provider-policy and security guards
 - [x] Cross-platform CI and packaging
 - [x] Documentation and examples
-- [ ] Alpha release readiness
+- [x] Alpha release readiness
 
 ## After v0.1
 
