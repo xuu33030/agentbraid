@@ -6,6 +6,7 @@ import os
 import tempfile
 from collections.abc import Sequence
 from contextlib import suppress
+from copy import deepcopy
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -48,6 +49,10 @@ _AUTH_MARKERS = (
     "not logged in",
     "unauthorized",
     "codex login",
+)
+_INVALID_SCHEMA_MARKERS = (
+    "invalid_json_schema",
+    "invalid schema for response_format",
 )
 
 
@@ -136,7 +141,7 @@ class CodexAdapter:
             schema_path = Path(temporary_dir) / "output.schema.json"
             output_path = Path(temporary_dir) / "last-message.json"
             schema_path.write_text(
-                json.dumps(output_type.model_json_schema(), sort_keys=True),
+                json.dumps(_strict_output_schema(output_type), sort_keys=True),
                 encoding="utf-8",
             )
             command = self._command(
@@ -367,6 +372,25 @@ def _non_negative_int(value: object) -> int:
     return 0
 
 
+def _strict_output_schema(output_type: type[OutputModelT]) -> dict[str, Any]:
+    schema = deepcopy(output_type.model_json_schema())
+    _normalize_strict_schema(schema)
+    return schema
+
+
+def _normalize_strict_schema(value: Any) -> None:
+    if isinstance(value, dict):
+        value.pop("default", None)
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            value["required"] = list(properties)
+        for nested_value in value.values():
+            _normalize_strict_schema(nested_value)
+    elif isinstance(value, list):
+        for nested_value in value:
+            _normalize_strict_schema(nested_value)
+
+
 def _classify_failure(
     return_code: int,
     stderr: bytes,
@@ -384,6 +408,11 @@ def _classify_failure(
         )
     )
     normalized = detail.casefold()
+    if any(marker in normalized for marker in _INVALID_SCHEMA_MARKERS):
+        return ProviderOutputError(
+            "Codex rejected the structured output schema",
+            detail=detail or f"exit code {return_code}",
+        )
     if any(marker in normalized for marker in _QUOTA_MARKERS):
         return ProviderUnavailableError(
             "Codex quota or rate limit was reached",

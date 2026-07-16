@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +10,20 @@ import pytest
 
 from agentbraid.config import AgentBraidConfig
 from agentbraid.errors import ProviderOutputError, ProviderUnavailableError
-from agentbraid.models import RunPlan, StartRunRequest, TaskKind, TaskSpec, WorkerResult
-from agentbraid.providers.codex import CodexAdapter, _classify_failure, _parse_jsonl
+from agentbraid.models import RunPlan, RunReview, StartRunRequest, TaskKind, TaskSpec, WorkerResult
+from agentbraid.providers.codex import (
+    CodexAdapter,
+    _classify_failure,
+    _parse_jsonl,
+    _strict_output_schema,
+)
+
+OUTPUT_MODELS = (RunPlan, WorkerResult, RunReview)
+NESTED_OUTPUT_MODELS = (
+    (RunPlan, ("TaskSpec",)),
+    (WorkerResult, ("ValidationEvidence",)),
+    (RunReview, ("ReviewFinding", "ValidationEvidence")),
+)
 
 
 class FakeStdin:
@@ -98,6 +111,75 @@ def jsonl(*events: dict[str, object]) -> bytes:
     return b"\n".join(json.dumps(event).encode() for event in events) + b"\n"
 
 
+def schema_dicts(value: object) -> list[dict[str, Any]]:
+    dictionaries: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        dictionaries.append(value)
+        for nested_value in value.values():
+            dictionaries.extend(schema_dicts(nested_value))
+    elif isinstance(value, list):
+        for nested_value in value:
+            dictionaries.extend(schema_dicts(nested_value))
+    return dictionaries
+
+
+@pytest.mark.parametrize("output_type", OUTPUT_MODELS)
+def test_strict_output_schema_requires_every_property(output_type: type[Any]) -> None:
+    schema = _strict_output_schema(output_type)
+    object_schemas = [
+        value for value in schema_dicts(schema) if isinstance(value.get("properties"), dict)
+    ]
+
+    assert object_schemas
+    for object_schema in object_schemas:
+        properties = object_schema["properties"]
+        required = object_schema.get("required")
+        assert isinstance(required, list)
+        assert required == list(properties)
+
+
+@pytest.mark.parametrize(("output_type", "definition_names"), NESTED_OUTPUT_MODELS)
+def test_strict_output_schema_normalizes_nested_definitions(
+    output_type: type[Any],
+    definition_names: tuple[str, ...],
+) -> None:
+    schema = _strict_output_schema(output_type)
+    definitions = schema.get("$defs")
+
+    assert isinstance(definitions, dict)
+    for definition_name in definition_names:
+        definition = definitions[definition_name]
+        properties = definition.get("properties")
+        assert isinstance(properties, dict)
+        assert definition.get("required") == list(properties)
+
+
+@pytest.mark.parametrize("output_type", OUTPUT_MODELS)
+def test_strict_output_schema_removes_all_defaults(output_type: type[Any]) -> None:
+    schema = _strict_output_schema(output_type)
+
+    assert all("default" not in value for value in schema_dicts(schema))
+
+
+@pytest.mark.parametrize("output_type", OUTPUT_MODELS)
+def test_strict_output_schema_does_not_mutate_pydantic_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    output_type: type[Any],
+) -> None:
+    original_schema = output_type.model_json_schema()
+    schema_snapshot = deepcopy(original_schema)
+    monkeypatch.setattr(
+        output_type,
+        "model_json_schema",
+        classmethod(lambda cls: original_schema),
+    )
+
+    normalized_schema = _strict_output_schema(output_type)
+
+    assert normalized_schema is not original_schema
+    assert original_schema == schema_snapshot
+
+
 @pytest.mark.asyncio
 async def test_plan_invokes_structured_read_only_codex(
     monkeypatch: pytest.MonkeyPatch,
@@ -127,6 +209,10 @@ async def test_plan_invokes_structured_read_only_codex(
     async def create_process(*args: str, **kwargs: Any) -> FakeProcess:
         invocation["args"] = args
         invocation["kwargs"] = kwargs
+        schema_index = args.index("--output-schema") + 1
+        invocation["output_schema"] = json.loads(
+            Path(args[schema_index]).read_text(encoding="utf-8")
+        )
         output_index = args.index("--output-last-message") + 1
         Path(args[output_index]).write_text(json.dumps(run_plan_payload()), encoding="utf-8")
         return process
@@ -148,6 +234,7 @@ async def test_plan_invokes_structured_read_only_codex(
     assert "GITHUB_TOKEN" not in invocation["kwargs"]["env"]
     assert "OPENAI_API_KEY" not in invocation["kwargs"]["env"]
     assert invocation["kwargs"]["env"]["AGENTBRAID_TEST_CONTEXT"] == "safe-value"
+    assert invocation["output_schema"] == _strict_output_schema(RunPlan)
     assert b"Inspect this repository." in process.stdin.payload
     assert process.stdin.closed is True
 
@@ -284,3 +371,15 @@ def test_quota_failure_is_retryable() -> None:
     assert isinstance(error, ProviderUnavailableError)
     assert error.retryable is True
     assert error.quota_limited is True
+
+
+def test_invalid_json_schema_failure_is_not_retryable() -> None:
+    error = _classify_failure(
+        1,
+        b"Invalid request: invalid_json_schema for response_format",
+        [],
+    )
+
+    assert isinstance(error, ProviderOutputError)
+    assert error.retryable is False
+    assert error.quota_limited is False
