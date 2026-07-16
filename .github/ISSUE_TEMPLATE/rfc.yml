@@ -1,0 +1,34 @@
+name: RFC proposal
+description: Propose a change to public contracts, architecture, or trust boundaries.
+title: "[RFC]: "
+labels:
+  - needs-rfc
+  - status:needs-triage
+body:
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision needed
+      description: What architectural decision should the project make?
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and impact
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed direction
+      description: Outline interfaces, data flow, compatibility, and migration.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security and provider-policy impact
+    validations:
+      required: true
+

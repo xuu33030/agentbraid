@@ -1,0 +1,49 @@
+name: Bug report
+description: Report reproducible incorrect behavior in AgentBraid.
+title: "[Bug]: "
+labels:
+  - bug
+  - status:needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private model transcripts, or unredacted repository data.
+        Report security issues privately using SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: AgentBraid version
+      placeholder: 0.1.0a1 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Current behavior
+      description: Include a minimal reproduction and redacted logs.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Additional context
+      description: Relevant Git state, MCP host, Codex version, and attempted workarounds.
+
