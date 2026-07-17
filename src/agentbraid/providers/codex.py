@@ -180,6 +180,9 @@ class CodexAdapter:
                     detail=f"timeout={self.config.codex_timeout_seconds}s",
                     retryable=True,
                 ) from exc
+            except asyncio.CancelledError:
+                await _terminate(process)
+                raise
             except ProviderOutputError:
                 await _terminate(process)
                 raise

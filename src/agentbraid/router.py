@@ -173,9 +173,6 @@ def _select_capability(
     ]
     if exact:
         return max(exact, key=lambda capability: _aware(capability.updated_at))
-    alternatives = [capability for capability in capabilities if capability.executor == executor]
-    if alternatives:
-        return max(alternatives, key=lambda capability: _aware(capability.updated_at))
     return CapabilitySnapshot(executor=executor, model=model)
 
 

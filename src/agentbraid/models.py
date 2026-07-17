@@ -196,6 +196,19 @@ class TaskState(StrictModel):
     updated_at: datetime
 
 
+class ProviderUsageRecord(StrictModel):
+    phase: str = Field(min_length=1, max_length=50)
+    executor: Executor
+    model: str = Field(min_length=1, max_length=200)
+    task_id: TaskId | None = None
+    input_tokens: int = Field(default=0, ge=0)
+    cached_input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    reasoning_output_tokens: int = Field(default=0, ge=0)
+    duration_seconds: float = Field(default=0, ge=0)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class RunSnapshot(StrictModel):
     run_id: str
     request: StartRunRequest
@@ -203,9 +216,12 @@ class RunSnapshot(StrictModel):
     plan: RunPlan | None = None
     lead_thread_id: str | None = None
     integration_branch: str | None = None
+    base_branch: str | None = None
+    base_commit: str | None = None
     final_summary: str | None = None
     error: str | None = None
     tasks: list[TaskState] = Field(default_factory=list)
+    provider_usage: list[ProviderUsageRecord] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

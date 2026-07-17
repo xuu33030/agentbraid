@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from agentbraid.models import (
     CapabilitySnapshot,
     Executor,
     HostTaskResult,
+    ProviderUsageRecord,
     RoutingDecision,
     RunPlan,
     RunStatus,
@@ -93,6 +95,71 @@ def test_run_and_plan_survive_store_restart(tmp_path: Path) -> None:
     assert snapshot.plan is not None
     assert [task.spec.task_id for task in snapshot.tasks] == ["build", "inspect"]
     assert [task.status for task in snapshot.tasks] == [TaskStatus.PENDING, TaskStatus.READY]
+
+
+def test_delivery_target_and_provider_usage_survive_restart(tmp_path: Path) -> None:
+    database_path = tmp_path / "state" / "agentbraid.db"
+    store = StateStore(database_path)
+    run = store.create_run(
+        StartRunRequest(goal="Persist metadata."),
+        base_branch="main",
+        base_commit="a" * 40,
+    )
+    store.record_provider_usage(
+        run.run_id,
+        ProviderUsageRecord(
+            phase="planning",
+            executor=Executor.CODEX,
+            model="gpt-test",
+            input_tokens=100,
+            cached_input_tokens=40,
+            output_tokens=20,
+            reasoning_output_tokens=5,
+            duration_seconds=1.5,
+        ),
+    )
+
+    snapshot = StateStore(database_path).get_run(run.run_id)
+
+    assert snapshot.base_branch == "main"
+    assert snapshot.base_commit == "a" * 40
+    assert len(snapshot.provider_usage) == 1
+    assert snapshot.provider_usage[0].cached_input_tokens == 40
+
+
+def test_schema_v1_database_migrates_to_v2(tmp_path: Path) -> None:
+    database_path = tmp_path / "agentbraid.db"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            request_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            plan_json TEXT,
+            lead_thread_id TEXT,
+            integration_branch TEXT,
+            final_summary TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 1;
+        """
+    )
+    connection.close()
+
+    StateStore(database_path)
+
+    migrated = sqlite3.connect(database_path)
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 2
+    run_columns = {row[1] for row in migrated.execute("PRAGMA table_info(runs)")}
+    assert {"base_branch", "base_commit"} <= run_columns
+    usage_table = migrated.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_usage'"
+    ).fetchone()
+    assert usage_table is not None
+    migrated.close()
 
 
 def test_dependency_becomes_ready_after_parent_succeeds(tmp_path: Path) -> None:

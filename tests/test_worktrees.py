@@ -132,3 +132,29 @@ def test_dirty_primary_workspace_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(WorktreeError, match="workspace must be clean"):
         manager.prepare_run("run-dirty", "agentbraid/run-dirty")
+
+
+def test_dirty_existing_integration_worktree_is_rejected(tmp_path: Path) -> None:
+    _, manager = repository(tmp_path)
+    integration = manager.prepare_run("run-read-only", "agentbraid/run-read-only")
+    (integration.path / "shared.txt").write_text("unexpected\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match="managed worktree must remain clean"):
+        manager.prepare_run("run-read-only", "agentbraid/run-read-only")
+
+
+def test_apply_rejects_a_different_primary_branch(tmp_path: Path) -> None:
+    root, manager = repository(tmp_path)
+    target = manager.primary_target()
+    task = manager.prepare_task("run-target", "change", "agentbraid/run-target")
+    (task.path / "feature.txt").write_text("ready\n", encoding="utf-8")
+    commit = manager.commit_task(task.path, "change", "Prepare feature")
+    manager.integrate_task("run-target", "change", "agentbraid/run-target", commit)
+    git(root, "switch", "-c", "other-branch")
+
+    with pytest.raises(WorktreeError, match="branch changed"):
+        manager.apply_integration_to_target(
+            "agentbraid/run-target",
+            expected_branch=target.branch,
+            expected_commit=target.commit,
+        )

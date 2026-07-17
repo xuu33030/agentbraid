@@ -21,6 +21,7 @@ from agentbraid.models import (
     DeliveryMode,
     Executor,
     HostTaskResult,
+    ProviderUsageRecord,
     RoutingDecision,
     RunPlan,
     RunSnapshot,
@@ -35,7 +36,7 @@ from agentbraid.models import (
 )
 from agentbraid.redaction import redact_model, redact_text, redact_value
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset({RunStatus.PLANNING, RunStatus.CANCELLED, RunStatus.FAILED}),
@@ -104,6 +105,8 @@ class StateStore:
                         plan_json TEXT,
                         lead_thread_id TEXT,
                         integration_branch TEXT,
+                        base_branch TEXT,
+                        base_commit TEXT,
                         final_summary TEXT,
                         error TEXT,
                         created_at TEXT NOT NULL,
@@ -165,12 +168,55 @@ class StateStore:
                         PRIMARY KEY (executor, model)
                     );
 
+                    CREATE TABLE provider_usage (
+                        usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL,
+                        task_id TEXT,
+                        phase TEXT NOT NULL,
+                        executor TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        input_tokens INTEGER NOT NULL,
+                        cached_input_tokens INTEGER NOT NULL,
+                        output_tokens INTEGER NOT NULL,
+                        reasoning_output_tokens INTEGER NOT NULL,
+                        duration_seconds REAL NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+                    );
+
                     CREATE INDEX tasks_claim_idx
                         ON tasks(run_id, executor, status, position);
                     CREATE INDEX task_dependencies_reverse_idx
                         ON task_dependencies(run_id, depends_on_task_id);
                     CREATE INDEX events_run_idx
                         ON events(run_id, event_id);
+                    CREATE INDEX provider_usage_run_idx
+                        ON provider_usage(run_id, usage_id);
+                    """
+                )
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            elif version == 1:
+                connection.executescript(
+                    """
+                    ALTER TABLE runs ADD COLUMN base_branch TEXT;
+                    ALTER TABLE runs ADD COLUMN base_commit TEXT;
+                    CREATE TABLE provider_usage (
+                        usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL,
+                        task_id TEXT,
+                        phase TEXT NOT NULL,
+                        executor TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        input_tokens INTEGER NOT NULL,
+                        cached_input_tokens INTEGER NOT NULL,
+                        output_tokens INTEGER NOT NULL,
+                        reasoning_output_tokens INTEGER NOT NULL,
+                        duration_seconds REAL NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+                    );
+                    CREATE INDEX provider_usage_run_idx
+                        ON provider_usage(run_id, usage_id);
                     """
                 )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -207,6 +253,8 @@ class StateStore:
         request: StartRunRequest,
         *,
         run_id: str | None = None,
+        base_branch: str | None = None,
+        base_commit: str | None = None,
     ) -> RunSnapshot:
         identifier = run_id or uuid4().hex
         request = redact_model(request)
@@ -216,13 +264,16 @@ class StateStore:
                 connection.execute(
                     """
                     INSERT INTO runs (
-                        run_id, request_json, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?)
+                        run_id, request_json, status, base_branch, base_commit,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         identifier,
                         request.model_dump_json(),
                         RunStatus.CREATED.value,
+                        base_branch,
+                        base_commit,
                         _dump_datetime(now),
                         _dump_datetime(now),
                     ),
@@ -245,7 +296,11 @@ class StateStore:
                 "SELECT * FROM tasks WHERE run_id = ? ORDER BY position, task_id",
                 (run_id,),
             ).fetchall()
-        return self._run_snapshot(run_row, task_rows)
+            usage_rows = connection.execute(
+                "SELECT * FROM provider_usage WHERE run_id = ? ORDER BY usage_id",
+                (run_id,),
+            ).fetchall()
+        return self._run_snapshot(run_row, task_rows, usage_rows)
 
     def begin_planning(self, run_id: str) -> RunSnapshot:
         return self.set_run_status(run_id, RunStatus.PLANNING)
@@ -765,6 +820,33 @@ class StateStore:
                 created_at=now,
             )
 
+    def record_provider_usage(self, run_id: str, usage: ProviderUsageRecord) -> None:
+        usage = redact_model(usage)
+        with self._transaction() as connection:
+            self._get_run_row(connection, run_id)
+            connection.execute(
+                """
+                INSERT INTO provider_usage (
+                    run_id, task_id, phase, executor, model, input_tokens,
+                    cached_input_tokens, output_tokens, reasoning_output_tokens,
+                    duration_seconds, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    usage.task_id,
+                    usage.phase,
+                    usage.executor.value,
+                    usage.model,
+                    usage.input_tokens,
+                    usage.cached_input_tokens,
+                    usage.output_tokens,
+                    usage.reasoning_output_tokens,
+                    usage.duration_seconds,
+                    _dump_datetime(usage.created_at),
+                ),
+            )
+
     def _get_run_row(self, connection: sqlite3.Connection, run_id: str) -> sqlite3.Row:
         row = connection.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         if row is None:
@@ -902,12 +984,17 @@ class StateStore:
             "SELECT * FROM tasks WHERE run_id = ? ORDER BY position, task_id",
             (run_row["run_id"],),
         ).fetchall()
-        return self._run_snapshot(run_row, task_rows)
+        usage_rows = connection.execute(
+            "SELECT * FROM provider_usage WHERE run_id = ? ORDER BY usage_id",
+            (run_row["run_id"],),
+        ).fetchall()
+        return self._run_snapshot(run_row, task_rows, usage_rows)
 
     def _run_snapshot(
         self,
         row: sqlite3.Row,
         task_rows: list[sqlite3.Row],
+        usage_rows: list[sqlite3.Row] | None = None,
     ) -> RunSnapshot:
         plan_json = row["plan_json"]
         return RunSnapshot(
@@ -917,9 +1004,26 @@ class StateStore:
             plan=RunPlan.model_validate_json(plan_json) if plan_json is not None else None,
             lead_thread_id=row["lead_thread_id"],
             integration_branch=row["integration_branch"],
+            base_branch=row["base_branch"],
+            base_commit=row["base_commit"],
             final_summary=row["final_summary"],
             error=row["error"],
             tasks=[self._task_state(task_row) for task_row in task_rows],
+            provider_usage=[
+                ProviderUsageRecord(
+                    phase=usage_row["phase"],
+                    executor=Executor(usage_row["executor"]),
+                    model=usage_row["model"],
+                    task_id=usage_row["task_id"],
+                    input_tokens=int(usage_row["input_tokens"]),
+                    cached_input_tokens=int(usage_row["cached_input_tokens"]),
+                    output_tokens=int(usage_row["output_tokens"]),
+                    reasoning_output_tokens=int(usage_row["reasoning_output_tokens"]),
+                    duration_seconds=float(usage_row["duration_seconds"]),
+                    created_at=_load_datetime(usage_row["created_at"]),
+                )
+                for usage_row in usage_rows or []
+            ],
             created_at=_load_datetime(row["created_at"]),
             updated_at=_load_datetime(row["updated_at"]),
         )
