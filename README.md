@@ -15,6 +15,7 @@ for Antigravity as the user-facing host and Codex CLI as the background engineer
 - Delegate bounded tasks to the active MCP host without launching or impersonating that host.
 - Isolate mutating Codex work in Git worktrees and integrate verified commits in DAG order.
 - Record task decisions, retries, reviews, and outcomes in local SQLite state.
+- Visualize task DAGs, durable events, provider usage, retries, and delivery readiness locally.
 - Reuse each provider through its documented client and the user's own authorization.
 
 ## Architecture
@@ -23,6 +24,8 @@ for Antigravity as the user-facing host and Codex CLI as the background engineer
 flowchart LR
     user["User"] --> host["Antigravity CLI<br/>official MCP host"]
     host <-->|"workspace MCP over stdio"| braid["AgentBraid"]
+    user --> dashboard["Local Dashboard<br/>127.0.0.1 only"]
+    dashboard --> braid
     braid --> codex["Codex CLI<br/>lead and workers"]
     braid --> state["SQLite state<br/>outside repository"]
     braid --> git["Git integration branch<br/>and isolated worktrees"]
@@ -72,13 +75,24 @@ confirm the workspace skill is loaded, then start with a bounded goal such as:
 `.agents/skills/agentbraid/SKILL.md`. AgentBraid produces a reviewed local integration branch;
 updating the current branch remains a separate, explicit `apply_run` action.
 
+In another terminal, open the local Dashboard for the current workspace and every workspace
+recorded in the same AgentBraid state database:
+
+```bash
+agentbraid dashboard .
+```
+
+The Dashboard binds only to `127.0.0.1`, uses an ephemeral authenticated browser session, and can
+inspect, cancel, or explicitly apply existing runs. Starting runs and completing host tasks remain
+inside Antigravity.
+
 For complete platform instructions and the MCP tool sequence, read
 [`docs/getting-started.md`](docs/getting-started.md) and
 [`docs/host-walkthrough.md`](docs/host-walkthrough.md).
 
 ## Documentation
 
-- [`docs/getting-started.md`](docs/getting-started.md): installation, workspace setup, and first run
+- [`docs/getting-started.md`](docs/getting-started.md): setup, first run, and local Dashboard
 - [`docs/host-walkthrough.md`](docs/host-walkthrough.md): host task protocol and MCP tool reference
 - [`docs/sample-run.md`](docs/sample-run.md): redacted, schema-valid run transcript
 - [`docs/troubleshooting.md`](docs/troubleshooting.md): common setup, task, Git, and quota failures
@@ -88,7 +102,7 @@ For complete platform instructions and the MCP tool sequence, read
 
 ## Development status
 
-The [`v0.1.0 Alpha roadmap`](ROADMAP.md) tracks public implementation work. Contributions are
+The [public roadmap](ROADMAP.md) tracks implementation work. Contributions are
 welcome through issue-first pull requests; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Security and provider terms

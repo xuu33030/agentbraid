@@ -1,6 +1,6 @@
 # Antigravity host walkthrough
 
-Antigravity is the user-facing MCP host in AgentBraid v0.1. Codex remains the accountable lead:
+Antigravity is the user-facing MCP host in AgentBraid v0.2. Codex remains the accountable lead:
 it creates the global plan, supplies routing preferences, performs Codex-assigned work, and gives
 the final review. Antigravity executes only tasks explicitly routed to `host`.
 
@@ -163,4 +163,3 @@ path. Never infer apply approval from the initial goal.
 The host must never ask AgentBraid to launch `agy`, expose Google credentials, push, deploy, or
 reuse another user's provider session. Review [`provider-policy.md`](provider-policy.md) and
 [`security-boundaries.md`](security-boundaries.md) before adapting this protocol to another host.
-

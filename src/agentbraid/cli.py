@@ -73,6 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="Install host integration in a workspace.")
     init_parser.add_argument("path", nargs="?", type=Path, default=Path.cwd())
     init_parser.add_argument("--force", action="store_true")
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Start the local AgentBraid run Dashboard.",
+    )
+    dashboard_parser.add_argument("path", nargs="?", type=Path, default=Path.cwd())
+    dashboard_parser.add_argument("--port", type=int, default=0)
+    dashboard_parser.add_argument("--no-open", action="store_true")
     return parser
 
 
@@ -104,6 +111,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         installed = install_workspace_integration(args.path.resolve(), force=args.force)
         for path in installed:
             print(path)
+        return 0
+    if args.command == "dashboard":
+        from agentbraid.dashboard import run_dashboard
+        from agentbraid.errors import AgentBraidError
+
+        try:
+            run_dashboard(args.path, port=args.port, open_browser=not args.no_open)
+        except AgentBraidError as exc:
+            print(f"[error] {exc.message}", file=sys.stderr)
+            return 1
         return 0
     parser.error(f"unknown command: {args.command}")
     return 2

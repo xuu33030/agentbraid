@@ -21,11 +21,15 @@ flowchart TB
         codex["Codex CLI<br/>authenticated user session"]
     end
 
-    subgraph agentbraid["AgentBraid local process"]
+    subgraph agentbraid["AgentBraid MCP process"]
         mcp["FastMCP stdio server"]
         scheduler["Planner and deterministic router"]
         integrator["Worktree and integration manager"]
         store["Durable SQLite state"]
+    end
+
+    subgraph dashboard_process["Independent local Dashboard process"]
+        dashboard["Authenticated loopback Web App"]
     end
 
     subgraph repository["Local Git repository boundary"]
@@ -39,6 +43,8 @@ flowchart TB
     scheduler -->|"codex exec --json"| codex
     scheduler --> store
     scheduler --> integrator
+    dashboard --> store
+    dashboard -->|"cancel / explicit apply"| integrator
     host -->|"edits only claimed worktree"| tasks
     codex -->|"bounded worker edits"| tasks
     integrator --> tasks
@@ -71,7 +77,20 @@ v0.1 weights and hard availability rules are documented in `docs/routing.md`.
 ### State store
 
 SQLite records runs, tasks, dependencies, attempts, events, capabilities, worktrees, and review
-findings. Runtime state lives outside the repository by default.
+findings. Schema v3 also denormalizes the run workspace and attributes provider usage to task
+attempts and outcomes. Runtime state lives outside the repository by default.
+
+### Local Dashboard
+
+`agentbraid dashboard` is a separate process that serves bundled HTML, CSS, and JavaScript on an
+authenticated `127.0.0.1` session. It lists runs from one active state database, derives token
+breakdowns without double-counting cached or reasoning subsets, and invokes the same service and
+worktree safety checks for explicit apply. It cannot start a run or execute host work.
+
+Because the Dashboard can cancel a run owned by the MCP process, every planning, worker, and
+review invocation races provider completion against the durable cancelled status. Same-process
+cancellation remains immediate; cross-process cancellation is observed through SQLite and then
+propagated to the Codex subprocess.
 
 ## Run lifecycle
 
@@ -112,6 +131,9 @@ sequenceDiagram
     Host->>Braid: apply_run(..., "apply-reviewed-run")
     Braid->>Git: Fast-forward current branch only
 ```
+
+The optional Dashboard observes the same persisted lifecycle and can issue cancellation or the
+same explicitly confirmed apply operation. It does not replace Antigravity as the MCP host.
 
 ```text
 created -> planning -> running -> integrating -> reviewing -> completed

@@ -16,12 +16,20 @@ provider interfaces or policies change.
 - [x] Documentation and examples
 - [x] Alpha release readiness
 
-## After v0.1
+## v0.2.0 Alpha
+
+- [x] Local authenticated run Dashboard
+- [x] Cross-workspace run history from one state database
+- [x] Provider usage, cache, reasoning, attempt, and retry visualization
+- [x] Cross-process cancellation and reviewed apply controls
+
+## After v0.2
 
 - Runtime capability evaluation and adaptive scoring
 - Additional provider adapters using explicitly supported programmatic interfaces
 - Streamable HTTP transport with local authentication
-- Rich run traces and exportable review reports
+- Exportable review reports
+- MCP Apps view when the active host advertises extension support
 - Stable MCP contracts and migration tooling
 
 ## Non-goals for v0.1

@@ -114,6 +114,30 @@ Check that:
 
 AgentBraid never performs a merge commit, force update, push, or deployment as a fallback.
 
+## Dashboard does not open or authenticate
+
+Run the Dashboard without automatic browser launch and open the printed URL exactly once:
+
+```bash
+agentbraid dashboard . --no-open
+```
+
+The URL contains a single-use bootstrap token. Reusing it after the browser session is established
+returns `invalid_bootstrap`; stop the process with `Ctrl+C` and start a new Dashboard session if
+the cookie was cleared. A fixed port can be requested with `--port`, but only `127.0.0.1` is used.
+
+If the workspace is missing from **All projects**, confirm it has a persisted run in the active
+state database. The Dashboard does not scan other custom databases.
+
+## Dashboard cancel or apply is rejected
+
+- Refresh the run and confirm it is still active before cancellation.
+- For apply, resolve every displayed blocker and type `apply-reviewed-run` exactly.
+- Keep the original branch and commit checked out and the primary workspace clean.
+- Do not edit the SQLite status directly; the MCP process monitors durable cancellation written by
+  AgentBraid, not arbitrary database changes.
+- If the run workspace was moved or deleted, history remains viewable but apply is disabled.
+
 ## Provider timeout, quota, or unavailable errors
 
 1. Verify `codex exec --help` and a normal Codex CLI request work outside AgentBraid.
@@ -147,4 +171,3 @@ Include only:
 
 Use the private process in [`../SECURITY.md`](../SECURITY.md) for credential exposure or security
 boundary failures.
-

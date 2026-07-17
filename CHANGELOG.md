@@ -7,6 +7,30 @@ uses semantic versioning after the alpha contract stabilizes.
 
 ## [Unreleased]
 
+## [0.2.0-alpha.1] - 2026-07-17
+
+### Added
+
+- Add an authenticated loopback Dashboard with cross-workspace run history, task DAGs, durable
+  event timelines, capability health, usage charts, cancellation, and reviewed apply controls.
+- Attribute provider usage to task attempts and outcomes, expose cache/reasoning subsets without
+  double-counting, and calculate objective retry overhead.
+
+### Changed
+
+- Upgrade SQLite state to schema v3 with sequential v1-to-v2-to-v3 migration and workspace
+  backfill.
+- Upgrade the Python package to `0.2.0a1`; the intended release tag is `v0.2.0-alpha.1`.
+
+### Security
+
+- Bind the Dashboard only to `127.0.0.1` with a single-use bootstrap token, process-lifetime
+  session cookie, Host/Origin/CSRF validation, restrictive response headers, and bundled assets.
+- Monitor durable cancellation from planning, task, and review invocations so a separate local
+  Dashboard process can terminate active Codex work without bypassing the service boundary.
+
+## [0.1.0-alpha.2] - 2026-07-17
+
 ### Fixed
 
 - Bind reviewed runs to their original branch and commit before local apply.
@@ -57,5 +81,7 @@ uses semantic versioning after the alpha contract stabilizes.
 - Integration conflicts require a new bounded repair run; AgentBraid does not force-resolve,
   push, deploy, or publish changes.
 
-[Unreleased]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.1...HEAD
+[0.2.0-alpha.1]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.2...v0.2.0-alpha.1
+[0.1.0-alpha.2]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/xuu33030/agentbraid/releases/tag/v0.1.0-alpha.1

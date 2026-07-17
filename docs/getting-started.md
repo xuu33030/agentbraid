@@ -1,7 +1,7 @@
 # Getting started
 
 This guide installs AgentBraid into a dedicated Python environment, connects it to one target Git
-repository, and starts a first Antigravity-hosted run. AgentBraid v0.1 is local-only alpha
+repository, and starts a first Antigravity-hosted run. AgentBraid v0.2 is local-only alpha
 software: it creates local branches and worktrees but never pushes or deploys.
 
 ## Prerequisites
@@ -25,7 +25,7 @@ will keep on disk:
 ```bash
 python -m venv ~/.venvs/agentbraid
 source ~/.venvs/agentbraid/bin/activate
-python -m pip install /path/to/agentbraid-0.1.0a2-py3-none-any.whl
+python -m pip install /path/to/agentbraid-0.2.0a1-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -34,7 +34,7 @@ Windows PowerShell:
 ```powershell
 py -3.13 -m venv $HOME\.venvs\agentbraid
 & $HOME\.venvs\agentbraid\Scripts\Activate.ps1
-python -m pip install C:\path\to\agentbraid-0.1.0a2-py3-none-any.whl
+python -m pip install C:\path\to\agentbraid-0.2.0a1-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -149,6 +149,34 @@ The host follows this lifecycle:
 
 See [`host-walkthrough.md`](host-walkthrough.md) for exact MCP payloads and Git requirements.
 
+## Open the local Dashboard
+
+Keep Antigravity running when a run is active, then open a second terminal in any repository whose
+AgentBraid state database you want to inspect:
+
+```bash
+agentbraid dashboard .
+```
+
+The command selects the current Git workspace when it has prior runs and also offers an **All
+projects** view for every workspace recorded in the active state database. Use `--no-open` to print
+the one-time browser URL without launching the default browser, or `--port 8123` to request a fixed
+loopback port. The Dashboard never binds to a remote interface.
+
+The run view provides:
+
+- dependency-aware task DAG and executor assignments;
+- durable run/task event timeline;
+- observed Codex input, cached input, output, reasoning, duration, and retry attribution;
+- capability health and final delivery readiness;
+- explicit cancellation and reviewed fast-forward apply controls.
+
+Observed total tokens equal input plus output. Cached input is a subset of input, and reasoning is
+a subset of output, so neither is added twice. Historical schema v2 usage is shown as legacy data
+without attempt/outcome attribution. AgentBraid cannot read Antigravity subscription usage,
+provider quota remaining, or a monetary cost for a fixed-price subscription and does not estimate
+those values.
+
 ## Review and apply
 
 Inspect the completed run and integration branch before delivery. Applying is intentionally
@@ -161,6 +189,11 @@ Call apply_run for run <RUN_ID> with confirmation apply-reviewed-run.
 Only do this after the user explicitly approves updating the current local branch. `apply_run`
 requires a completed integration-delivery run and performs only a local `git merge --ff-only`.
 It does not push or deploy.
+
+The Dashboard exposes the same operation only when its preflight confirms the original branch and
+commit, a clean primary workspace, and an existing integration branch. The browser still requires
+typing the exact `apply-reviewed-run` confirmation, and the backend revalidates immediately before
+the fast-forward.
 
 ## Optional configuration
 
