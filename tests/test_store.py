@@ -6,14 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from agentbraid.errors import InvalidTransitionError, StateError
+from agentbraid.errors import InvalidTransitionError, RunNotFoundError, StateError
 from agentbraid.models import (
     CapabilitySnapshot,
     Executor,
     HostTaskResult,
+    LocalizedRunNames,
     ProviderInvocationOutcome,
     ProviderUsageRecord,
     RoutingDecision,
+    RunExecutionSettings,
     RunPlan,
     RunStatus,
     StartRunRequest,
@@ -22,6 +24,7 @@ from agentbraid.models import (
     TaskSpec,
     TaskStatus,
     WorkerResult,
+    WorkspaceSettings,
 )
 from agentbraid.store import StateStore
 
@@ -128,7 +131,7 @@ def test_delivery_target_and_provider_usage_survive_restart(tmp_path: Path) -> N
     assert snapshot.provider_usage[0].cached_input_tokens == 40
 
 
-def test_schema_v1_database_migrates_to_v3(tmp_path: Path) -> None:
+def test_schema_v1_database_migrates_to_v4(tmp_path: Path) -> None:
     database_path = tmp_path / "agentbraid.db"
     connection = sqlite3.connect(database_path)
     connection.executescript(
@@ -153,15 +156,25 @@ def test_schema_v1_database_migrates_to_v3(tmp_path: Path) -> None:
     StateStore(database_path)
 
     migrated = sqlite3.connect(database_path)
-    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
     run_columns = {row[1] for row in migrated.execute("PRAGMA table_info(runs)")}
-    assert {"base_branch", "base_commit", "workspace"} <= run_columns
+    assert {
+        "base_branch",
+        "base_commit",
+        "workspace",
+        "display_names_json",
+        "execution_settings_json",
+    } <= run_columns
     usage_table = migrated.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_usage'"
     ).fetchone()
     assert usage_table is not None
     usage_columns = {row[1] for row in migrated.execute("PRAGMA table_info(provider_usage)")}
     assert {"attempt", "outcome"} <= usage_columns
+    settings_table = migrated.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_settings'"
+    ).fetchone()
+    assert settings_table is not None
     migrated.close()
 
 
@@ -227,7 +240,7 @@ def test_schema_v2_database_migrates_workspace_and_usage_attribution(tmp_path: P
     StateStore(database_path)
 
     migrated = sqlite3.connect(database_path)
-    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
     assert (
         migrated.execute("SELECT workspace FROM runs WHERE run_id = 'legacy-run'").fetchone()[0]
         == "/tmp/example-workspace"
@@ -236,6 +249,124 @@ def test_schema_v2_database_migrates_workspace_and_usage_attribution(tmp_path: P
         "SELECT attempt, outcome FROM provider_usage WHERE run_id = 'legacy-run'"
     ).fetchone() == (None, None)
     migrated.close()
+
+
+def test_schema_v3_database_migrates_names_settings_and_workspace_defaults(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "agentbraid.db"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            request_json TEXT NOT NULL,
+            workspace TEXT NOT NULL,
+            status TEXT NOT NULL,
+            plan_json TEXT,
+            lead_thread_id TEXT,
+            integration_branch TEXT,
+            base_branch TEXT,
+            base_commit TEXT,
+            final_summary TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 3;
+        """
+    )
+    connection.close()
+
+    StateStore(database_path)
+
+    migrated = sqlite3.connect(database_path)
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
+    run_columns = {row[1] for row in migrated.execute("PRAGMA table_info(runs)")}
+    assert {"display_names_json", "execution_settings_json"} <= run_columns
+    assert migrated.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_settings'"
+    ).fetchone() == ("workspace_settings",)
+    migrated.close()
+
+
+def test_run_names_execution_snapshot_and_workspace_settings_persist(tmp_path: Path) -> None:
+    database_path = tmp_path / "agentbraid.db"
+    store = StateStore(database_path)
+    names = LocalizedRunNames.model_validate(
+        {
+            "en": "Inspect project README",
+            "zh-TW": "檢查專案 README",
+            "zh-CN": "检查项目 README",
+        }
+    )
+    execution = RunExecutionSettings(
+        codex_binary="codex",
+        codex_model="gpt-test",
+        host_model="agy-label",
+        max_parallel_codex=2,
+        worktree_dir=str(tmp_path / "worktrees"),
+    )
+    run = store.create_run(
+        StartRunRequest(goal="Inspect README.", workspace=str(tmp_path)),
+        display_names=names,
+        execution_settings=execution,
+    )
+    workspace_settings = WorkspaceSettings(
+        **execution.model_dump(),
+        workspace=str(tmp_path),
+    )
+    store.upsert_workspace_settings(workspace_settings)
+
+    restarted = StateStore(database_path)
+    snapshot = restarted.get_run(run.run_id)
+    summary = restarted.list_runs()[0]
+    saved_settings = restarted.get_workspace_settings(str(tmp_path))
+
+    assert snapshot.display_names == names
+    assert snapshot.execution_settings == execution
+    assert summary.display_names == names
+    assert saved_settings is not None
+    assert saved_settings.codex_model == "gpt-test"
+    assert saved_settings.workspace == str(tmp_path.resolve())
+
+    updated = names.model_copy(update={"zh_tw": "檢視專案 README"})
+    restarted.update_run_names(run.run_id, updated)
+    assert restarted.get_run(run.run_id).display_names == updated
+    assert restarted.list_run_events(run.run_id)[-1].event_type == "run.renamed"
+
+
+def test_delete_run_record_cascades_local_database_state(tmp_path: Path) -> None:
+    database_path = tmp_path / "agentbraid.db"
+    store = StateStore(database_path)
+    task, decision = make_task("delete-me", executor=Executor.CODEX)
+    run_id = create_planned_run(store, (task, decision))
+    store.record_provider_usage(
+        run_id,
+        ProviderUsageRecord(
+            phase="task",
+            executor=Executor.CODEX,
+            model="gpt-test",
+            task_id="delete-me",
+            attempt=1,
+            outcome=ProviderInvocationOutcome.FAILED,
+        ),
+    )
+    store.cancel_run(run_id)
+
+    store.delete_run_record(run_id)
+
+    with pytest.raises(RunNotFoundError):
+        store.get_run(run_id)
+    connection = sqlite3.connect(database_path)
+    for table in ("tasks", "task_dependencies", "events", "provider_usage"):
+        assert (
+            connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+            == 0
+        )
+    connection.close()
 
 
 def test_run_and_workspace_summaries_include_retry_usage(tmp_path: Path) -> None:

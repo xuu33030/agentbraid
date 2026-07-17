@@ -21,10 +21,12 @@ from agentbraid.models import (
     DeliveryMode,
     Executor,
     HostTaskResult,
+    LocalizedRunNames,
     ProviderInvocationOutcome,
     ProviderUsageRecord,
     RoutingDecision,
     RunEvent,
+    RunExecutionSettings,
     RunPlan,
     RunSnapshot,
     RunStatus,
@@ -35,12 +37,13 @@ from agentbraid.models import (
     TaskState,
     TaskStatus,
     WorkerResult,
+    WorkspaceSettings,
     WorkspaceSummary,
     utc_now,
 )
 from agentbraid.redaction import redact_model, redact_text, redact_value
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset({RunStatus.PLANNING, RunStatus.CANCELLED, RunStatus.FAILED}),
@@ -106,6 +109,8 @@ class StateStore:
                         run_id TEXT PRIMARY KEY,
                         request_json TEXT NOT NULL,
                         workspace TEXT NOT NULL,
+                        display_names_json TEXT,
+                        execution_settings_json TEXT,
                         status TEXT NOT NULL,
                         plan_json TEXT,
                         lead_thread_id TEXT,
@@ -191,6 +196,12 @@ class StateStore:
                         FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
                     );
 
+                    CREATE TABLE workspace_settings (
+                        workspace TEXT PRIMARY KEY,
+                        settings_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+
                     CREATE INDEX tasks_claim_idx
                         ON tasks(run_id, executor, status, position);
                     CREATE INDEX task_dependencies_reverse_idx
@@ -248,6 +259,20 @@ class StateStore:
                         "UPDATE runs SET workspace = ? WHERE run_id = ?",
                         (request.workspace or "", row["run_id"]),
                     )
+                connection.execute("PRAGMA user_version = 3")
+                version = 3
+            if version == 3:
+                connection.executescript(
+                    """
+                    ALTER TABLE runs ADD COLUMN display_names_json TEXT;
+                    ALTER TABLE runs ADD COLUMN execution_settings_json TEXT;
+                    CREATE TABLE workspace_settings (
+                        workspace TEXT PRIMARY KEY,
+                        settings_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    """
+                )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -284,6 +309,8 @@ class StateStore:
         run_id: str | None = None,
         base_branch: str | None = None,
         base_commit: str | None = None,
+        execution_settings: RunExecutionSettings | None = None,
+        display_names: LocalizedRunNames | None = None,
     ) -> RunSnapshot:
         identifier = run_id or uuid4().hex
         request = redact_model(request)
@@ -293,14 +320,21 @@ class StateStore:
                 connection.execute(
                     """
                     INSERT INTO runs (
-                        run_id, request_json, workspace, status, base_branch, base_commit,
+                        run_id, request_json, workspace, display_names_json,
+                        execution_settings_json, status, base_branch, base_commit,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         identifier,
                         request.model_dump_json(),
                         request.workspace or "",
+                        display_names.model_dump_json(by_alias=True)
+                        if display_names is not None
+                        else None,
+                        execution_settings.model_dump_json()
+                        if execution_settings is not None
+                        else None,
                         RunStatus.CREATED.value,
                         base_branch,
                         base_commit,
@@ -425,7 +459,10 @@ class StateStore:
                 ORDER BY updated_at DESC, r.workspace
                 """
             ).fetchall()
-        return [
+            settings_rows = connection.execute(
+                "SELECT workspace, updated_at FROM workspace_settings ORDER BY updated_at DESC"
+            ).fetchall()
+        summaries = [
             WorkspaceSummary(
                 workspace=row["workspace"],
                 run_count=int(row["run_count"]),
@@ -435,6 +472,76 @@ class StateStore:
             )
             for row in rows
         ]
+        known = {item.workspace for item in summaries}
+        summaries.extend(
+            WorkspaceSummary(
+                workspace=row["workspace"],
+                run_count=0,
+                active_run_count=0,
+                observed_total_tokens=0,
+                updated_at=_load_datetime(row["updated_at"]),
+            )
+            for row in settings_rows
+            if row["workspace"] not in known
+        )
+        return sorted(summaries, key=lambda item: (item.updated_at, item.workspace), reverse=True)
+
+    def get_workspace_settings(self, workspace: str) -> WorkspaceSettings | None:
+        resolved = str(Path(workspace).expanduser().resolve())
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT settings_json FROM workspace_settings WHERE workspace = ?",
+                (resolved,),
+            ).fetchone()
+        if row is None:
+            return None
+        return WorkspaceSettings.model_validate_json(row["settings_json"])
+
+    def upsert_workspace_settings(self, settings: WorkspaceSettings) -> WorkspaceSettings:
+        settings = redact_model(settings)
+        resolved = str(Path(settings.workspace).expanduser().resolve())
+        normalized = settings.model_copy(update={"workspace": resolved, "updated_at": utc_now()})
+        with self._transaction(immediate=True) as connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_settings (workspace, settings_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(workspace) DO UPDATE SET
+                    settings_json = excluded.settings_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    resolved,
+                    normalized.model_dump_json(),
+                    _dump_datetime(normalized.updated_at),
+                ),
+            )
+        return normalized
+
+    def list_observed_models(self, executor: Executor) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT model, MAX(updated_at) AS observed_at
+                FROM (
+                    SELECT model, updated_at FROM capabilities WHERE executor = ?
+                    UNION ALL
+                    SELECT model, created_at AS updated_at FROM provider_usage WHERE executor = ?
+                )
+                GROUP BY model
+                ORDER BY observed_at DESC, model
+                """,
+                (executor.value, executor.value),
+            ).fetchall()
+        return [str(row["model"]) for row in rows]
+
+    def delete_run_record(self, run_id: str) -> None:
+        with self._transaction(immediate=True) as connection:
+            row = self._get_run_row(connection, run_id)
+            status = RunStatus(row["status"])
+            if status not in _TERMINAL_RUN_STATUSES:
+                raise StateError(f"run must be terminal before deletion: {status.value}")
+            connection.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
 
     def begin_planning(self, run_id: str) -> RunSnapshot:
         return self.set_run_status(run_id, RunStatus.PLANNING)
@@ -472,12 +579,16 @@ class StateStore:
             connection.execute(
                 """
                 UPDATE runs
-                SET plan_json = ?, status = ?, lead_thread_id = ?,
+                SET plan_json = ?, display_names_json = COALESCE(?, display_names_json),
+                    status = ?, lead_thread_id = ?,
                     integration_branch = ?, updated_at = ?
                 WHERE run_id = ?
                 """,
                 (
                     plan.model_dump_json(),
+                    plan.display_names.model_dump_json(by_alias=True)
+                    if plan.display_names is not None
+                    else None,
                     RunStatus.RUNNING.value,
                     lead_thread_id,
                     integration_branch,
@@ -523,6 +634,36 @@ class StateStore:
                     "status": RunStatus.RUNNING.value,
                     "task_count": len(plan.tasks),
                     "schema_version": plan.schema_version,
+                },
+                created_at=now,
+            )
+        return self.get_run(run_id)
+
+    def update_run_names(
+        self,
+        run_id: str,
+        display_names: LocalizedRunNames,
+    ) -> RunSnapshot:
+        display_names = redact_model(display_names)
+        now = utc_now()
+        with self._transaction(immediate=True) as connection:
+            row = self._get_run_row(connection, run_id)
+            previous = row["display_names_json"]
+            connection.execute(
+                "UPDATE runs SET display_names_json = ?, updated_at = ? WHERE run_id = ?",
+                (
+                    display_names.model_dump_json(by_alias=True),
+                    _dump_datetime(now),
+                    run_id,
+                ),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                "run.renamed",
+                {
+                    "previous": json.loads(previous) if previous is not None else None,
+                    "display_names": display_names.model_dump(mode="json", by_alias=True),
                 },
                 created_at=now,
             )
@@ -1140,6 +1281,16 @@ class StateStore:
             run_id=row["run_id"],
             request=StartRunRequest.model_validate_json(row["request_json"]),
             status=RunStatus(row["status"]),
+            display_names=(
+                LocalizedRunNames.model_validate_json(row["display_names_json"])
+                if row["display_names_json"] is not None
+                else None
+            ),
+            execution_settings=(
+                RunExecutionSettings.model_validate_json(row["execution_settings_json"])
+                if row["execution_settings_json"] is not None
+                else None
+            ),
             plan=RunPlan.model_validate_json(plan_json) if plan_json is not None else None,
             lead_thread_id=row["lead_thread_id"],
             integration_branch=row["integration_branch"],
@@ -1182,6 +1333,11 @@ class StateStore:
             run_id=row["run_id"],
             workspace=row["workspace"] or request.workspace or "",
             goal=request.goal,
+            display_names=(
+                LocalizedRunNames.model_validate_json(row["display_names_json"])
+                if row["display_names_json"] is not None
+                else None
+            ),
             status=RunStatus(row["status"]),
             delivery_mode=request.delivery_mode,
             base_branch=row["base_branch"],

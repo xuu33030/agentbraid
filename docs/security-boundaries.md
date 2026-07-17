@@ -53,8 +53,15 @@ goals, repositories, task results, or bug reports.
 - Cancellation is persisted first. MCP-side planning, worker, and review invocations monitor the
   durable status and terminate their Codex subprocess when another local AgentBraid process
   cancels the run.
-- The Dashboard cannot start runs, claim host tasks, execute provider work, read provider
-  credentials, push, or deploy.
+- The Dashboard may start the same workspace-scoped service lifecycle and launch only the official
+  Codex CLI. It cannot claim or execute host tasks, launch or control Antigravity, read provider
+  credentials, push, or deploy. The AGY model field is routing metadata, not a provider control.
+- Run deletion requires an exact confirmation and revalidates every managed artifact. Active runs,
+  dirty worktrees, unmerged integration branches, unique task patches, moved workspaces, and
+  unverifiable paths preserve both local artifacts and the corresponding database record.
+- Workspace settings are restricted to workspaces already represented by the active database or
+  the Dashboard's initial Git workspace. Environment-variable values remain authoritative;
+  database and state paths are not editable in the browser.
 
 ## Delivery
 

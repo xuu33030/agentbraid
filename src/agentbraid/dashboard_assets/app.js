@@ -16,6 +16,9 @@ const state = {
   workspaces: [],
   runs: [],
   capabilities: [],
+  modelOptions: { codex: [], host: [] },
+  selectedRunIds: new Set(),
+  deletePreviews: [],
   selectedRunId: null,
   selectedTaskId: null,
   detail: null,
@@ -34,11 +37,15 @@ const elements = {
   workspaceSelect: document.getElementById("workspace-select"),
   languageSelect: document.getElementById("language-select"),
   refreshButton: document.getElementById("refresh-button"),
+  settingsButton: document.getElementById("settings-button"),
+  startRunButton: document.getElementById("start-run-button"),
   connectionState: document.getElementById("connection-state"),
   runCount: document.getElementById("run-count"),
   runListToggle: document.getElementById("run-list-toggle"),
   runListRegion: document.getElementById("run-list-region"),
   scopeSummary: document.getElementById("scope-summary"),
+  selectVisibleRuns: document.getElementById("select-visible-runs"),
+  deleteSelectedButton: document.getElementById("delete-selected-button"),
   runList: document.getElementById("run-list"),
   loadMoreButton: document.getElementById("load-more-button"),
   emptyState: document.getElementById("empty-state"),
@@ -46,8 +53,10 @@ const elements = {
   runStatus: document.getElementById("run-status"),
   runId: document.getElementById("run-id"),
   runGoal: document.getElementById("run-goal"),
+  runOriginalGoal: document.getElementById("run-original-goal"),
   runWorkspace: document.getElementById("run-workspace"),
   cancelButton: document.getElementById("cancel-button"),
+  renameButton: document.getElementById("rename-button"),
   applyButton: document.getElementById("apply-button"),
   applyActionHint: document.getElementById("apply-action-hint"),
   actionMessage: document.getElementById("action-message"),
@@ -76,6 +85,54 @@ const elements = {
   applyConfirmation: document.getElementById("apply-confirmation"),
   confirmApplyButton: document.getElementById("confirm-apply-button"),
   closeApplyDialog: document.getElementById("close-apply-dialog"),
+  startRunDialog: document.getElementById("start-run-dialog"),
+  startRunForm: document.getElementById("start-run-form"),
+  closeStartRun: document.getElementById("close-start-run"),
+  startWorkspace: document.getElementById("start-workspace"),
+  startGoal: document.getElementById("start-goal"),
+  startConstraints: document.getElementById("start-constraints"),
+  startCodexModel: document.getElementById("start-codex-model"),
+  startHostModel: document.getElementById("start-host-model"),
+  startRouting: document.getElementById("start-routing"),
+  startDelivery: document.getElementById("start-delivery"),
+  startWorkspaceMode: document.getElementById("start-workspace-mode"),
+  startParallel: document.getElementById("start-parallel"),
+  startAttempts: document.getElementById("start-attempts"),
+  startTimeout: document.getElementById("start-timeout"),
+  startOutputBytes: document.getElementById("start-output-bytes"),
+  startSaveDefaults: document.getElementById("start-save-defaults"),
+  settingsDialog: document.getElementById("settings-dialog"),
+  settingsForm: document.getElementById("settings-form"),
+  closeSettings: document.getElementById("close-settings"),
+  settingsWorkspace: document.getElementById("settings-workspace"),
+  settingsCodexModel: document.getElementById("settings-codex-model"),
+  settingsHostModel: document.getElementById("settings-host-model"),
+  settingsRouting: document.getElementById("settings-routing"),
+  settingsDelivery: document.getElementById("settings-delivery"),
+  settingsWorkspaceMode: document.getElementById("settings-workspace-mode"),
+  settingsParallel: document.getElementById("settings-parallel"),
+  settingsAttempts: document.getElementById("settings-attempts"),
+  settingsTimeout: document.getElementById("settings-timeout"),
+  settingsOutputBytes: document.getElementById("settings-output-bytes"),
+  settingsCodexBinary: document.getElementById("settings-codex-binary"),
+  settingsWorktreeDir: document.getElementById("settings-worktree-dir"),
+  settingsDatabasePath: document.getElementById("settings-database-path"),
+  settingsStateDir: document.getElementById("settings-state-dir"),
+  settingsRestartNote: document.getElementById("settings-restart-note"),
+  renameDialog: document.getElementById("rename-dialog"),
+  renameForm: document.getElementById("rename-form"),
+  closeRename: document.getElementById("close-rename"),
+  renameEn: document.getElementById("rename-en"),
+  renameZhTw: document.getElementById("rename-zh-tw"),
+  renameZhCn: document.getElementById("rename-zh-cn"),
+  deleteDialog: document.getElementById("delete-dialog"),
+  deleteForm: document.getElementById("delete-form"),
+  closeDelete: document.getElementById("close-delete"),
+  deletePreview: document.getElementById("delete-preview"),
+  deleteConfirmation: document.getElementById("delete-confirmation"),
+  confirmDelete: document.getElementById("confirm-delete"),
+  codexModelOptions: document.getElementById("codex-model-options"),
+  hostModelOptions: document.getElementById("host-model-options"),
   toast: document.getElementById("toast"),
 };
 
@@ -118,6 +175,19 @@ const valueLabels = {
   deliveryMode: {
     integration_branch: ["deliveryMode.integration_branch", "Integration branch"],
     report_only: ["deliveryMode.report_only", "Report only"],
+  },
+  routingMode: {
+    hybrid: ["routingMode.hybrid", "Hybrid"],
+    codex_only: ["routingMode.codex_only", "Codex-only"],
+  },
+  workspaceMode: {
+    worktree_write: ["workspaceMode.worktree_write", "Isolated worktree writes"],
+    read_only: ["workspaceMode.read_only", "Read-only"],
+  },
+  artifactKind: {
+    database: ["cleanup.database", "Database records"],
+    worktree: ["cleanup.worktree", "Managed worktree"],
+    branch: ["cleanup.branch", "Managed branch"],
   },
   usageSegment: {
     uncached: ["usage.segment.uncached", "uncached"],
@@ -247,6 +317,13 @@ function applyStaticTranslations() {
     element.dataset.i18nAriaLabelFallback = fallback;
     element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel, fallback));
   }
+  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
+    const fallback = element.dataset.i18nPlaceholderFallback
+      ?? element.getAttribute("placeholder")
+      ?? "";
+    element.dataset.i18nPlaceholderFallback = fallback;
+    element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder, fallback));
+  }
 }
 
 function applyLocale(locale, { persist = false, announce = false, rerender = true } = {}) {
@@ -256,12 +333,14 @@ function applyLocale(locale, { persist = false, announce = false, rerender = tru
     persistLocale(state.locale);
   }
   applyStaticTranslations();
+  renderConfigurationOptionLabels();
   renderConnection();
   renderRunListToggle();
   if (rerender && state.meta) {
     renderWorkspaceOptions();
     renderRunList();
     renderScopeSummary();
+    renderDeletePreview();
     if (state.detail) {
       renderRunDetail({ clearMessage: false });
     } else {
@@ -371,6 +450,83 @@ function truncate(value, length) {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
+function runGoal(run) {
+  return run.goal ?? run.request?.goal ?? "";
+}
+
+function localizedRunName(run) {
+  const names = run.display_names;
+  if (names) {
+    return names[state.locale] || names.en || names["zh-TW"] || names["zh-CN"] || runGoal(run);
+  }
+  return runGoal(run);
+}
+
+function concreteWorkspace() {
+  const selected = elements.workspaceSelect.value;
+  if (selected && state.workspaces.some((item) => item.workspace === selected)) {
+    return selected;
+  }
+  if (
+    state.meta?.initial_workspace
+    && state.workspaces.some((item) => item.workspace === state.meta.initial_workspace)
+  ) {
+    return state.meta.initial_workspace;
+  }
+  return state.workspaces[0]?.workspace || "";
+}
+
+function workspaceOptions() {
+  return state.workspaces.map((workspace) => {
+    const option = createElement("option", "", shortPath(workspace.workspace));
+    option.value = workspace.workspace;
+    option.title = workspace.workspace;
+    return option;
+  });
+}
+
+function renderActionWorkspaceOptions() {
+  const fallback = concreteWorkspace();
+  for (const select of [elements.startWorkspace, elements.settingsWorkspace]) {
+    const current = select.value;
+    select.replaceChildren(...workspaceOptions());
+    select.value = [...select.options].some((option) => option.value === current)
+      ? current
+      : fallback;
+  }
+  const hasWorkspace = Boolean(fallback);
+  elements.startRunButton.disabled = !hasWorkspace;
+  elements.settingsButton.disabled = !hasWorkspace;
+}
+
+function renderModelOptions() {
+  const render = (target, models) => {
+    target.replaceChildren(...models.map((model) => {
+      const option = document.createElement("option");
+      option.value = model;
+      return option;
+    }));
+  };
+  render(elements.codexModelOptions, state.modelOptions.codex || []);
+  render(elements.hostModelOptions, state.modelOptions.host || []);
+}
+
+function renderConfigurationOptionLabels() {
+  const mappings = [
+    [elements.startRouting, "routingMode"],
+    [elements.settingsRouting, "routingMode"],
+    [elements.startDelivery, "deliveryMode"],
+    [elements.settingsDelivery, "deliveryMode"],
+    [elements.startWorkspaceMode, "workspaceMode"],
+    [elements.settingsWorkspaceMode, "workspaceMode"],
+  ];
+  for (const [select, group] of mappings) {
+    for (const option of select.options) {
+      option.textContent = translatedValue(group, option.value);
+    }
+  }
+}
+
 function statusPill(status) {
   const pill = createElement("span", `status-pill ${status}`, translatedValue("status", status));
   return pill;
@@ -417,15 +573,18 @@ async function initialize() {
     }
     applyLocale(state.locale, { rerender: false });
     setConnection("", "connection.loading", "Loading");
-    const [metaPayload, workspacePayload, capabilityPayload] = await Promise.all([
+    const [metaPayload, workspacePayload, capabilityPayload, modelPayload] = await Promise.all([
       api("/api/v1/meta"),
       api("/api/v1/workspaces"),
       api("/api/v1/capabilities"),
+      api("/api/v1/model-options"),
     ]);
     state.meta = metaPayload;
     state.workspaces = workspacePayload.workspaces;
     state.capabilities = capabilityPayload.capabilities;
+    state.modelOptions = modelPayload;
     renderWorkspaceOptions();
+    renderModelOptions();
     if (
       state.meta.initial_workspace &&
       state.workspaces.some((item) => item.workspace === state.meta.initial_workspace)
@@ -458,6 +617,7 @@ function renderWorkspaceOptions() {
   if ([...elements.workspaceSelect.options].some((option) => option.value === currentValue)) {
     elements.workspaceSelect.value = currentValue;
   }
+  renderActionWorkspaceOptions();
 }
 
 async function loadRuns({ reset = false, append = false, silent = false } = {}) {
@@ -496,6 +656,10 @@ async function loadRuns({ reset = false, append = false, silent = false } = {}) 
 }
 
 function renderRunList() {
+  const visibleIds = new Set(state.runs.map((run) => run.run_id));
+  state.selectedRunIds = new Set(
+    [...state.selectedRunIds].filter((runId) => visibleIds.has(runId)),
+  );
   elements.runCount.textContent = formatNumber(state.runs.length);
   if (!state.runs.length) {
     elements.runList.replaceChildren(
@@ -503,6 +667,26 @@ function renderRunList() {
     );
   } else {
     const items = state.runs.map((run) => {
+      const row = createElement("div", "run-item-row");
+      const selection = createElement("label", "run-select");
+      const checkbox = document.createElement("input");
+      const name = localizedRunName(run);
+      checkbox.type = "checkbox";
+      checkbox.checked = state.selectedRunIds.has(run.run_id);
+      checkbox.setAttribute(
+        "aria-label",
+        t("run.selectAria", "Select {name} for deletion", { name }),
+      );
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          state.selectedRunIds.add(run.run_id);
+        } else {
+          state.selectedRunIds.delete(run.run_id);
+        }
+        updateSelectionControls();
+      });
+      selection.append(checkbox);
+
       const button = createElement(
         "button",
         `run-item${run.run_id === state.selectedRunId ? " selected" : ""}`,
@@ -514,17 +698,34 @@ function renderRunList() {
       const top = createElement("div", "run-item-top");
       top.append(statusPill(run.status));
       top.append(createElement("span", "mono subtle", run.run_id.slice(0, 8)));
-      const goal = createElement("div", "run-item-goal", run.goal);
+      const goal = createElement("div", "run-item-goal", name);
+      goal.title = run.goal;
       const footer = createElement("div", "run-item-footer");
       footer.append(createElement("span", "", shortPath(run.workspace)));
       footer.append(createElement("span", "", formatNumber(run.observed_total_tokens)));
       button.append(top, goal, footer);
       button.addEventListener("click", () => selectRun(run.run_id, { focusDetail: true }));
-      return button;
+      row.append(selection, button);
+      return row;
     });
     elements.runList.replaceChildren(...items);
   }
   elements.loadMoreButton.hidden = !state.hasMore;
+  updateSelectionControls();
+}
+
+function updateSelectionControls() {
+  const selectedCount = state.selectedRunIds.size;
+  const visibleCount = state.runs.length;
+  elements.selectVisibleRuns.disabled = visibleCount === 0;
+  elements.selectVisibleRuns.checked = visibleCount > 0 && selectedCount === visibleCount;
+  elements.selectVisibleRuns.indeterminate = selectedCount > 0 && selectedCount < visibleCount;
+  elements.deleteSelectedButton.disabled = selectedCount === 0;
+  elements.deleteSelectedButton.textContent = selectedCount
+    ? t("action.deleteSelectedCount", "Delete selected ({count})", {
+      count: formatNumber(selectedCount),
+    })
+    : t("action.deleteSelected", "Delete selected");
 }
 
 function renderRunListToggle() {
@@ -601,7 +802,14 @@ function renderRunDetail({ clearMessage = true } = {}) {
   elements.runStatus.textContent = translatedValue("status", run.status);
   elements.runStatus.className = `status-pill ${run.status}`;
   elements.runId.textContent = run.run_id;
-  elements.runGoal.textContent = run.request.goal;
+  const name = localizedRunName(run);
+  elements.runGoal.textContent = name;
+  elements.runOriginalGoal.textContent = t(
+    "run.originalGoal",
+    "Original goal: {goal}",
+    { goal: run.request.goal },
+  );
+  elements.runOriginalGoal.hidden = name === run.request.goal;
   elements.runWorkspace.textContent = run.request.workspace
     || t("common.unknownWorkspace", "Unknown workspace");
   elements.cancelButton.hidden = !actions.can_cancel;
@@ -1032,6 +1240,7 @@ const eventLabels = {
   "run.reviewed": ["event.run.reviewed", "Final review recorded"],
   "run.cancelled": ["event.run.cancelled", "Run cancelled"],
   "run.applied": ["event.run.applied", "Integration applied"],
+  "run.renamed": ["event.run.renamed", "Run names updated"],
   "task.status_changed": ["event.task.status_changed", "Task status changed"],
   "task.claimed": ["event.task.claimed", "Task claimed"],
   "task.worktree_assigned": ["event.task.worktree_assigned", "Worktree assigned"],
@@ -1142,19 +1351,236 @@ function renderDelivery(run, readiness) {
     || t("delivery.finalPending", "Final review has not completed.");
 }
 
+function integerValue(input) {
+  return Number.parseInt(input.value, 10);
+}
+
+function addModelOption(group, model) {
+  const value = String(model || "").trim();
+  if (!value || state.modelOptions[group].includes(value)) {
+    return;
+  }
+  state.modelOptions[group] = [value, ...state.modelOptions[group]];
+  renderModelOptions();
+}
+
+async function workspaceSettings(workspace) {
+  const query = new URLSearchParams({ workspace });
+  return api(`/api/v1/settings?${query.toString()}`);
+}
+
+function populateStartSettings(settings) {
+  elements.startCodexModel.value = settings.codex_model || "";
+  elements.startHostModel.value = settings.host_model;
+  elements.startRouting.value = settings.routing_mode;
+  elements.startDelivery.value = settings.delivery_mode;
+  elements.startWorkspaceMode.value = settings.workspace_mode;
+  elements.startParallel.value = settings.max_parallel_codex;
+  elements.startAttempts.value = settings.max_task_attempts;
+  elements.startTimeout.value = settings.codex_timeout_seconds;
+  elements.startOutputBytes.value = settings.max_output_bytes;
+}
+
+function settingsFieldMap() {
+  return {
+    codex_model: elements.settingsCodexModel,
+    max_parallel_codex: elements.settingsParallel,
+    max_task_attempts: elements.settingsAttempts,
+    codex_timeout_seconds: elements.settingsTimeout,
+    max_output_bytes: elements.settingsOutputBytes,
+    codex_binary: elements.settingsCodexBinary,
+    worktree_dir: elements.settingsWorktreeDir,
+  };
+}
+
+function populateSettingsForm(payload) {
+  const settings = payload.settings;
+  elements.settingsWorkspace.value = settings.workspace;
+  elements.settingsCodexModel.value = settings.codex_model || "";
+  elements.settingsHostModel.value = settings.host_model;
+  elements.settingsRouting.value = settings.routing_mode;
+  elements.settingsDelivery.value = settings.delivery_mode;
+  elements.settingsWorkspaceMode.value = settings.workspace_mode;
+  elements.settingsParallel.value = settings.max_parallel_codex;
+  elements.settingsAttempts.value = settings.max_task_attempts;
+  elements.settingsTimeout.value = settings.codex_timeout_seconds;
+  elements.settingsOutputBytes.value = settings.max_output_bytes;
+  elements.settingsCodexBinary.value = settings.codex_binary;
+  elements.settingsWorktreeDir.value = settings.worktree_dir;
+  elements.settingsDatabasePath.value = payload.database_path;
+  elements.settingsStateDir.value = payload.state_dir;
+  elements.settingsRestartNote.hidden = !payload.requires_restart;
+  const locked = new Set(payload.locked_fields || []);
+  for (const [field, input] of Object.entries(settingsFieldMap())) {
+    input.disabled = locked.has(field);
+    input.title = locked.has(field)
+      ? t("form.environmentLocked", "Controlled by an environment variable")
+      : "";
+  }
+}
+
+function startRequestPayload() {
+  const codexModel = elements.startCodexModel.value.trim();
+  const hostModel = elements.startHostModel.value.trim();
+  const constraints = elements.startConstraints.value
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return {
+    request: {
+      goal: elements.startGoal.value.trim(),
+      workspace: elements.startWorkspace.value,
+      host_model: hostModel,
+      constraints,
+      delivery_mode: elements.startDelivery.value,
+      execution: {
+        codex_model: codexModel || null,
+        host_model: hostModel,
+        routing_mode: elements.startRouting.value,
+        delivery_mode: elements.startDelivery.value,
+        workspace_mode: elements.startWorkspaceMode.value,
+        max_parallel_codex: integerValue(elements.startParallel),
+        max_task_attempts: integerValue(elements.startAttempts),
+        codex_timeout_seconds: integerValue(elements.startTimeout),
+        max_output_bytes: integerValue(elements.startOutputBytes),
+      },
+    },
+    save_defaults: elements.startSaveDefaults.checked,
+  };
+}
+
+function settingsRequestPayload() {
+  const codexModel = elements.settingsCodexModel.value.trim();
+  return {
+    settings: {
+      workspace: elements.settingsWorkspace.value,
+      codex_binary: elements.settingsCodexBinary.value.trim(),
+      codex_model: codexModel || null,
+      host_model: elements.settingsHostModel.value.trim(),
+      routing_mode: elements.settingsRouting.value,
+      delivery_mode: elements.settingsDelivery.value,
+      workspace_mode: elements.settingsWorkspaceMode.value,
+      max_parallel_codex: integerValue(elements.settingsParallel),
+      max_task_attempts: integerValue(elements.settingsAttempts),
+      codex_timeout_seconds: integerValue(elements.settingsTimeout),
+      max_output_bytes: integerValue(elements.settingsOutputBytes),
+      worktree_dir: elements.settingsWorktreeDir.value.trim(),
+    },
+  };
+}
+
+async function openStartRunDialog() {
+  const workspace = concreteWorkspace();
+  if (!workspace) {
+    return;
+  }
+  elements.startRunForm.reset();
+  renderActionWorkspaceOptions();
+  elements.startWorkspace.value = workspace;
+  const payload = await workspaceSettings(workspace);
+  populateStartSettings(payload.settings);
+  elements.startSaveDefaults.checked = false;
+  elements.startRunDialog.showModal();
+  elements.startGoal.focus();
+}
+
+async function openSettingsDialog() {
+  const workspace = concreteWorkspace();
+  if (!workspace) {
+    return;
+  }
+  renderActionWorkspaceOptions();
+  elements.settingsWorkspace.value = workspace;
+  populateSettingsForm(await workspaceSettings(workspace));
+  elements.settingsDialog.showModal();
+}
+
+function renderDeletePreview() {
+  if (!state.deletePreviews.length) {
+    elements.deletePreview.replaceChildren();
+    elements.confirmDelete.disabled = true;
+    return;
+  }
+  const runById = new Map(state.runs.map((run) => [run.run_id, run]));
+  const items = state.deletePreviews.map((preview) => {
+    const item = createElement("article", `cleanup-item${preview.deletable ? "" : " blocked"}`);
+    const run = runById.get(preview.run_id);
+    const heading = createElement("div", "cleanup-heading");
+    heading.append(
+      createElement("strong", "", run ? localizedRunName(run) : preview.run_id),
+      createElement(
+        "span",
+        `cleanup-state ${preview.deletable ? "ready" : "blocked"}`,
+        preview.deletable
+          ? t("cleanup.ready", "Ready to delete")
+          : t("cleanup.blocked", "Deletion blocked"),
+      ),
+    );
+    item.append(heading);
+    const artifacts = createElement("ul", "cleanup-artifacts");
+    for (const artifact of preview.artifacts) {
+      const label = translatedValue("artifactKind", artifact.kind);
+      const status = artifact.removable
+        ? t("cleanup.removable", "removable")
+        : t("cleanup.preserved", "preserved");
+      const detail = artifact.detail ? ` · ${artifact.detail}` : "";
+      artifacts.append(
+        createElement(
+          "li",
+          artifact.removable ? "" : "blocked",
+          `${label}: ${artifact.identifier} · ${status}${detail}`,
+        ),
+      );
+    }
+    item.append(artifacts);
+    for (const blocker of preview.blockers) {
+      item.append(createElement("p", "cleanup-blocker", blocker));
+    }
+    return item;
+  });
+  elements.deletePreview.replaceChildren(...items);
+  const deletable = state.deletePreviews.some((preview) => preview.deletable);
+  elements.deleteConfirmation.disabled = !deletable;
+  elements.confirmDelete.disabled = !deletable
+    || elements.deleteConfirmation.value !== "delete-selected-runs";
+}
+
+async function openDeleteDialog() {
+  const runIds = state.runs
+    .filter((run) => state.selectedRunIds.has(run.run_id))
+    .map((run) => run.run_id);
+  if (!runIds.length) {
+    return;
+  }
+  const payload = await api("/api/v1/runs/delete-preview", {
+    method: "POST",
+    body: JSON.stringify({ run_ids: runIds }),
+  });
+  state.deletePreviews = payload.previews;
+  elements.deleteConfirmation.value = "";
+  renderDeletePreview();
+  elements.deleteDialog.showModal();
+  if (state.deletePreviews.some((preview) => preview.deletable)) {
+    elements.deleteConfirmation.focus();
+  }
+}
+
 async function refreshAll({ silent = false } = {}) {
   if (state.pollInFlight) {
     return;
   }
   state.pollInFlight = true;
   try {
-    const [workspacePayload, capabilityPayload] = await Promise.all([
+    const [workspacePayload, capabilityPayload, modelPayload] = await Promise.all([
       api("/api/v1/workspaces"),
       api("/api/v1/capabilities"),
+      api("/api/v1/model-options"),
     ]);
     state.workspaces = workspacePayload.workspaces;
     state.capabilities = capabilityPayload.capabilities;
+    state.modelOptions = modelPayload;
     renderWorkspaceOptions();
+    renderModelOptions();
     await loadRuns({ reset: true, silent });
   } catch (error) {
     handleError(error);
@@ -1172,6 +1598,8 @@ function handleError(error) {
 }
 
 elements.workspaceSelect.addEventListener("change", () => {
+  state.selectedRunIds.clear();
+  state.deletePreviews = [];
   state.selectedRunId = null;
   state.selectedTaskId = null;
   state.mobileRunListExpanded = false;
@@ -1189,6 +1617,188 @@ elements.runListToggle.addEventListener("click", () => {
 });
 
 elements.refreshButton.addEventListener("click", () => refreshAll());
+
+elements.selectVisibleRuns.addEventListener("change", () => {
+  if (elements.selectVisibleRuns.checked) {
+    state.selectedRunIds = new Set(state.runs.map((run) => run.run_id));
+  } else {
+    state.selectedRunIds.clear();
+  }
+  renderRunList();
+});
+
+elements.deleteSelectedButton.addEventListener("click", () => {
+  openDeleteDialog().catch(handleError);
+});
+
+elements.startRunButton.addEventListener("click", () => {
+  openStartRunDialog().catch(handleError);
+});
+
+elements.closeStartRun.addEventListener("click", () => elements.startRunDialog.close());
+
+elements.startWorkspace.addEventListener("change", async () => {
+  try {
+    populateStartSettings((await workspaceSettings(elements.startWorkspace.value)).settings);
+  } catch (error) {
+    handleError(error);
+  }
+});
+
+elements.startRunForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = elements.startRunForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    const requestPayload = startRequestPayload();
+    const payload = await api("/api/v1/runs", {
+      method: "POST",
+      body: JSON.stringify(requestPayload),
+    });
+    addModelOption("codex", requestPayload.request.execution.codex_model);
+    addModelOption("host", requestPayload.request.host_model);
+    state.selectedRunId = payload.run.run_id;
+    elements.startRunDialog.close();
+    showToast(t("toast.runStarted", "Run started."));
+    await refreshAll();
+  } catch (error) {
+    handleError(error);
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+elements.settingsButton.addEventListener("click", () => {
+  openSettingsDialog().catch(handleError);
+});
+
+elements.closeSettings.addEventListener("click", () => elements.settingsDialog.close());
+
+elements.settingsWorkspace.addEventListener("change", async () => {
+  try {
+    populateSettingsForm(await workspaceSettings(elements.settingsWorkspace.value));
+  } catch (error) {
+    handleError(error);
+  }
+});
+
+elements.settingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = elements.settingsForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    const requestPayload = settingsRequestPayload();
+    const payload = await api("/api/v1/settings", {
+      method: "PUT",
+      body: JSON.stringify(requestPayload),
+    });
+    addModelOption("codex", requestPayload.settings.codex_model);
+    addModelOption("host", requestPayload.settings.host_model);
+    populateSettingsForm(payload);
+    showToast(
+      payload.requires_restart
+        ? t("toast.settingsRestart", "Settings saved. Restart Dashboard and MCP to apply runtime changes.")
+        : t("toast.settingsSaved", "Workspace settings saved."),
+    );
+    await refreshAll({ silent: true });
+  } catch (error) {
+    handleError(error);
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+elements.renameButton.addEventListener("click", () => {
+  if (!state.detail) {
+    return;
+  }
+  const { run } = state.detail;
+  const names = run.display_names || {};
+  elements.renameEn.value = names.en || run.request.goal;
+  elements.renameZhTw.value = names["zh-TW"] || run.request.goal;
+  elements.renameZhCn.value = names["zh-CN"] || run.request.goal;
+  elements.renameDialog.showModal();
+  elements.renameEn.focus();
+});
+
+elements.closeRename.addEventListener("click", () => elements.renameDialog.close());
+
+elements.renameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.selectedRunId) {
+    return;
+  }
+  const submitButton = elements.renameForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    await api(`/api/v1/runs/${encodeURIComponent(state.selectedRunId)}/names`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        display_names: {
+          en: elements.renameEn.value.trim(),
+          "zh-TW": elements.renameZhTw.value.trim(),
+          "zh-CN": elements.renameZhCn.value.trim(),
+        },
+      }),
+    });
+    elements.renameDialog.close();
+    showToast(t("toast.runRenamed", "Run names updated."));
+    await refreshAll();
+  } catch (error) {
+    handleError(error);
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+elements.closeDelete.addEventListener("click", () => elements.deleteDialog.close());
+
+elements.deleteConfirmation.addEventListener("input", renderDeletePreview);
+
+elements.deleteDialog.addEventListener("close", () => {
+  state.deletePreviews = [];
+  elements.deleteConfirmation.value = "";
+  renderDeletePreview();
+});
+
+elements.deleteForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (elements.deleteConfirmation.value !== "delete-selected-runs") {
+    return;
+  }
+  const runIds = state.deletePreviews.map((preview) => preview.run_id);
+  if (!runIds.length) {
+    return;
+  }
+  elements.confirmDelete.disabled = true;
+  try {
+    const payload = await api("/api/v1/runs/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        run_ids: runIds,
+        confirmation: elements.deleteConfirmation.value,
+      }),
+    });
+    const deleted = payload.results.filter((result) => result.deleted);
+    const blocked = payload.results.length - deleted.length;
+    for (const result of deleted) {
+      state.selectedRunIds.delete(result.run_id);
+      if (state.selectedRunId === result.run_id) {
+        state.selectedRunId = null;
+      }
+    }
+    elements.deleteDialog.close();
+    showToast(t(
+      "toast.runsDeleted",
+      "Deleted {deleted} run(s); {blocked} preserved.",
+      { deleted: formatNumber(deleted.length), blocked: formatNumber(blocked) },
+    ));
+    await refreshAll();
+  } catch (error) {
+    elements.confirmDelete.disabled = false;
+    handleError(error);
+  }
+});
 
 elements.loadMoreButton.addEventListener("click", async () => {
   state.offset += PAGE_SIZE;

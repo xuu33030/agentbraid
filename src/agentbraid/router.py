@@ -73,6 +73,7 @@ class TaskRouter:
         *,
         codex_model: str,
         host_model: str,
+        allowed_executors: frozenset[Executor] = frozenset({Executor.CODEX, Executor.HOST}),
         now: datetime | None = None,
     ) -> dict[str, RoutingDecision]:
         routed_at = now or utc_now()
@@ -89,7 +90,12 @@ class TaskRouter:
             ),
         }
         return {
-            task.task_id: self.route_task(task, selected_capabilities, now=routed_at)
+            task.task_id: self.route_task(
+                task,
+                selected_capabilities,
+                allowed_executors=allowed_executors,
+                now=routed_at,
+            )
             for task in plan.tasks
         }
 
@@ -98,11 +104,18 @@ class TaskRouter:
         task: TaskSpec,
         capabilities: dict[Executor, CapabilitySnapshot],
         *,
+        allowed_executors: frozenset[Executor] = frozenset({Executor.CODEX, Executor.HOST}),
         now: datetime | None = None,
     ) -> RoutingDecision:
         routed_at = now or utc_now()
         scores = [
-            self._score(task, executor, capabilities[executor], routed_at)
+            self._score(
+                task,
+                executor,
+                capabilities[executor],
+                routed_at,
+                allowed=executor in allowed_executors,
+            )
             for executor in (Executor.CODEX, Executor.HOST)
         ]
         available = [score for score in scores if score.available]
@@ -132,9 +145,11 @@ class TaskRouter:
         executor: Executor,
         capability: CapabilitySnapshot,
         now: datetime,
+        *,
+        allowed: bool,
     ) -> _ScoredExecutor:
         status_score, available = _availability_score(capability, now)
-        available = available and _executor_allowed(task, executor)
+        available = available and allowed and _executor_allowed(task, executor)
         components: list[tuple[str, float]] = [
             ("fit", _KIND_FIT[task.kind][executor]),
             (

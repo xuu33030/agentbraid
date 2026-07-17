@@ -4,6 +4,7 @@ import asyncio
 import os
 from collections.abc import Coroutine
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
@@ -25,8 +26,14 @@ from agentbraid.models import (
     DeliveryMode,
     Executor,
     HostTaskResult,
+    LocalizedRunNames,
     ProviderInvocationOutcome,
     ProviderUsageRecord,
+    RoutingMode,
+    RunCleanupPreview,
+    RunCleanupResult,
+    RunExecutionOverrides,
+    RunExecutionSettings,
     RunPlan,
     RunReview,
     RunSnapshot,
@@ -37,6 +44,7 @@ from agentbraid.models import (
     TaskState,
     TaskStatus,
     WorkerResult,
+    WorkspaceMode,
     utc_now,
 )
 from agentbraid.providers.base import StructuredProviderResult
@@ -100,8 +108,10 @@ class AgentBraidService:
         )
         self.store = store or StateStore(config.database_path)
         self.codex = codex or CodexAdapter(config)
+        self._codex_override = codex
         self.router = router or TaskRouter()
         self.worktrees = worktrees or WorktreeManager(self.workspace, config.worktree_dir)
+        self._worktrees_override = worktrees
         self._drain_locks: dict[str, asyncio.Lock] = {}
         self._finalize_locks: dict[str, asyncio.Lock] = {}
         self._integration_locks: dict[str, asyncio.Lock] = {}
@@ -113,6 +123,10 @@ class AgentBraidService:
     def from_workspace(cls, workspace: Path) -> AgentBraidService:
         resolved = workspace.expanduser().resolve()
         config = AgentBraidConfig.load(resolved)
+        store = StateStore(config.database_path)
+        saved = store.get_workspace_settings(str(resolved))
+        if saved is not None:
+            config = config.with_workspace_runtime(saved)
         assert_safe_runtime_paths(
             resolved,
             config.state_dir,
@@ -120,25 +134,66 @@ class AgentBraidService:
             config.worktree_dir,
         )
         config.ensure_directories()
-        return cls(config, resolved)
+        return cls(config, resolved, store=store)
 
     async def start_run(self, request: StartRunRequest) -> RunSnapshot:
+        run = self.create_run(request)
+        return await self.execute_run(run.run_id)
+
+    def create_run(self, request: StartRunRequest) -> RunSnapshot:
         _assert_not_child()
-        self.worktrees.assert_clean_workspace()
-        target = self.worktrees.primary_target()
-        normalized_request = redact_model(self._normalize_request(request))
-        run = self.store.create_run(
+        settings = self._resolve_execution_settings(request)
+        worktrees = self._worktrees_for_settings(settings)
+        worktrees.assert_clean_workspace()
+        target = worktrees.primary_target()
+        normalized_request = redact_model(
+            self._normalize_request(request).model_copy(
+                update={
+                    "host_model": settings.host_model,
+                    "delivery_mode": settings.delivery_mode,
+                    "execution": RunExecutionOverrides(
+                        codex_model=settings.codex_model,
+                        host_model=settings.host_model,
+                        routing_mode=settings.routing_mode,
+                        delivery_mode=settings.delivery_mode,
+                        workspace_mode=settings.workspace_mode,
+                        max_parallel_codex=settings.max_parallel_codex,
+                        max_task_attempts=settings.max_task_attempts,
+                        codex_timeout_seconds=settings.codex_timeout_seconds,
+                        max_output_bytes=settings.max_output_bytes,
+                    ),
+                }
+            )
+        )
+        return self.store.create_run(
             normalized_request,
             base_branch=target.branch,
             base_commit=target.commit,
+            execution_settings=settings,
         )
+
+    async def execute_run(self, run_id: str) -> RunSnapshot:
+        run = self.store.get_run(run_id)
+        if run.status != RunStatus.CREATED:
+            raise StateError(f"run must be created before execution: {run.status.value}")
+        settings = self._settings_for_run(run)
+        worktrees = self._worktrees_for_run(run)
+        codex = self._codex_for_run(run)
+        target = worktrees.primary_target()
+        if run.base_branch != target.branch or run.base_commit != target.commit:
+            self.store.set_run_status(
+                run.run_id,
+                RunStatus.FAILED,
+                error="primary workspace changed before planning started",
+            )
+            raise WorktreeError("primary workspace changed before planning started")
         self.store.begin_planning(run.run_id)
-        model = self.config.codex_model or "codex-default"
+        model = settings.codex_model or "codex-default"
         try:
             planning = await self._await_invocation(
                 run.run_id,
                 "planning",
-                self.codex.plan(normalized_request, self.workspace),
+                codex.plan(run.request, self.workspace),
             )
             if self.store.get_run_status(run.run_id) == RunStatus.CANCELLED:
                 raise _RunCancelled
@@ -158,32 +213,45 @@ class AgentBraidService:
                 latency_seconds=planning.duration_seconds,
                 status=CapabilityStatus.HEALTHY,
             )
+            display_names = planning.output.display_names or _fallback_display_names(
+                run.request.goal
+            )
             plan = planning.output.model_copy(
                 update={
+                    "display_names": display_names,
                     "tasks": [
                         task.model_copy(
                             update={
                                 "max_attempts": min(
                                     task.max_attempts,
-                                    self.config.max_task_attempts,
+                                    settings.max_task_attempts,
                                 )
                             }
                         )
                         for task in planning.output.tasks
-                    ]
+                    ],
                 }
             )
+            if settings.workspace_mode == WorkspaceMode.READ_ONLY and any(
+                task.mutates_workspace for task in plan.tasks
+            ):
+                raise RoutingError("read-only runs cannot contain mutating tasks")
             assignments = self.router.route_plan(
                 plan,
                 self.store.list_capabilities(),
                 codex_model=model,
-                host_model=normalized_request.host_model,
+                host_model=settings.host_model,
+                allowed_executors=(
+                    frozenset({Executor.CODEX})
+                    if settings.routing_mode == RoutingMode.CODEX_ONLY
+                    else frozenset({Executor.CODEX, Executor.HOST})
+                ),
             )
             integration_branch = f"agentbraid/integration/{run.run_id[:12]}"
-            current_target = self.worktrees.primary_target()
+            current_target = worktrees.primary_target()
             if current_target != target:
                 raise WorktreeError("primary workspace changed while the run was being planned")
-            self.worktrees.prepare_run(
+            worktrees.prepare_run(
                 run.run_id,
                 integration_branch,
                 base_commit=target.commit,
@@ -231,16 +299,17 @@ class AgentBraidService:
         claimed = self.store.claim_host_task(run_id, safe_host_id, task_id=task_id)
         if claimed is not None:
             run = self.store.get_run(run_id)
+            worktrees = self._worktrees_for_run(run)
             integration_branch = _integration_branch(run)
             try:
                 if claimed.spec.mutates_workspace:
-                    worktree = self.worktrees.prepare_task(
+                    worktree = worktrees.prepare_task(
                         run_id,
                         claimed.spec.task_id,
                         integration_branch,
                     )
                 else:
-                    worktree = self.worktrees.prepare_run(run_id, integration_branch)
+                    worktree = worktrees.prepare_run(run_id, integration_branch)
                 claimed = self.store.set_task_worktree(
                     run_id,
                     claimed.spec.task_id,
@@ -270,6 +339,8 @@ class AgentBraidService:
     ) -> TaskState:
         safe_host_id = redact_text(host_id)
         task = _task_by_id(self.store.get_run(run_id), task_id)
+        run = self.store.get_run(run_id)
+        worktrees = self._worktrees_for_run(run)
         if task.status != TaskStatus.RUNNING or task.executor != Executor.HOST:
             raise StateError(f"host task is not running: {run_id}/{task_id}")
         if task.claimed_by != safe_host_id:
@@ -280,10 +351,10 @@ class AgentBraidService:
             if commit_sha is None:
                 raise StateError("successful mutating host tasks must provide a commit SHA")
             try:
-                self.worktrees.integrate_task(
+                worktrees.integrate_task(
                     run_id,
                     task_id,
-                    _integration_branch(self.store.get_run(run_id)),
+                    _integration_branch(run),
                     commit_sha,
                 )
             except WorktreeError as exc:
@@ -302,7 +373,7 @@ class AgentBraidService:
             raise StateError("non-mutating host tasks must not submit a commit SHA")
         elif not task.spec.mutates_workspace and task.worktree_path is not None:
             try:
-                self.worktrees.assert_clean_worktree(Path(task.worktree_path))
+                worktrees.assert_clean_worktree(Path(task.worktree_path))
             except WorktreeError as exc:
                 raise StateError(
                     "non-mutating host task changed its read-only worktree",
@@ -318,7 +389,7 @@ class AgentBraidService:
         )
         self.store.record_capability_result(
             Executor.HOST,
-            self.store.get_run(run_id).request.host_model,
+            self._settings_for_run(run).host_model,
             succeeded=result.outcome == TaskOutcome.SUCCEEDED,
             latency_seconds=0,
             status=(
@@ -344,8 +415,29 @@ class AgentBraidService:
     def list_capabilities(self) -> list[CapabilitySnapshot]:
         return self.store.list_capabilities()
 
+    def resolve_execution_settings(self, request: StartRunRequest) -> RunExecutionSettings:
+        return self._resolve_execution_settings(request)
+
+    def preview_run_cleanup(self, run_id: str) -> RunCleanupPreview:
+        run = self.store.get_run(run_id)
+        return self._worktrees_for_run(run).preview_run_cleanup(run)
+
+    def delete_run(self, run_id: str) -> RunCleanupResult:
+        run = self.store.get_run(run_id)
+        preview = self._worktrees_for_run(run).preview_run_cleanup(run)
+        if not preview.deletable:
+            return RunCleanupResult(
+                run_id=run_id,
+                deleted=False,
+                blockers=preview.blockers,
+            )
+        self._worktrees_for_run(run).cleanup_run_artifacts(run)
+        self.store.delete_run_record(run_id)
+        return RunCleanupResult(run_id=run_id, deleted=True)
+
     def get_apply_readiness(self, run_id: str) -> ApplyReadiness:
         run = self.store.get_run(run_id)
+        worktrees = self._worktrees_for_run(run)
         blockers: list[str] = []
         if run.request.delivery_mode != DeliveryMode.INTEGRATION_BRANCH:
             blockers.append("report-only runs cannot be applied")
@@ -359,14 +451,14 @@ class AgentBraidService:
         current_branch: str | None = None
         current_commit: str | None = None
         try:
-            target = self.worktrees.primary_target()
+            target = worktrees.primary_target()
             current_branch = target.branch
             current_commit = target.commit
             if not blockers:
                 assert run.integration_branch is not None
                 assert run.base_branch is not None
                 assert run.base_commit is not None
-                self.worktrees.validate_apply_target(
+                worktrees.validate_apply_target(
                     run.integration_branch,
                     expected_branch=run.base_branch,
                     expected_commit=run.base_commit,
@@ -388,6 +480,7 @@ class AgentBraidService:
                 "apply_run requires the explicit confirmation phrase: apply-reviewed-run"
             )
         run = self.store.get_run(run_id)
+        worktrees = self._worktrees_for_run(run)
         if run.request.delivery_mode != DeliveryMode.INTEGRATION_BRANCH:
             raise StateError("report-only runs cannot be applied to the primary workspace")
         if run.status != RunStatus.COMPLETED:
@@ -395,7 +488,7 @@ class AgentBraidService:
         integration_branch = _integration_branch(run)
         if run.base_branch is None or run.base_commit is None:
             raise StateError("run is missing its original delivery target")
-        commit_sha = self.worktrees.apply_integration_to_target(
+        commit_sha = worktrees.apply_integration_to_target(
             integration_branch,
             expected_branch=run.base_branch,
             expected_commit=run.base_commit,
@@ -457,10 +550,12 @@ class AgentBraidService:
 
     async def _drain_codex_tasks(self, run_id: str) -> None:
         async with self._lock(self._drain_locks, run_id):
-            model = self.config.codex_model or "codex-default"
+            run = self.store.get_run(run_id)
+            settings = self._settings_for_run(run)
+            model = settings.codex_model or "codex-default"
             while self.store.get_run(run_id).status == RunStatus.RUNNING:
                 claimed: list[TaskState] = []
-                for _ in range(self.config.max_parallel_codex):
+                for _ in range(settings.max_parallel_codex):
                     task = self.store.claim_task(
                         run_id,
                         Executor.CODEX,
@@ -482,25 +577,27 @@ class AgentBraidService:
         model: str,
     ) -> None:
         run = self.store.get_run(run_id)
+        worktrees = self._worktrees_for_run(run)
+        codex = self._codex_for_run(run)
         integration_branch = _integration_branch(run)
         worktree_path = Path(task.worktree_path) if task.worktree_path else None
         commit_sha: str | None = None
         try:
             async with self._lock(self._integration_locks, run_id):
                 if task.spec.mutates_workspace:
-                    worktree = self.worktrees.prepare_task(
+                    worktree = worktrees.prepare_task(
                         run_id,
                         task.spec.task_id,
                         integration_branch,
                     )
                 else:
-                    worktree = self.worktrees.prepare_run(run_id, integration_branch)
+                    worktree = worktrees.prepare_run(run_id, integration_branch)
             worktree_path = worktree.path
             task = self.store.set_task_worktree(run_id, task.spec.task_id, worktree.path)
             invocation = await self._await_invocation(
                 run_id,
                 task.spec.task_id,
-                self.codex.execute_task(task.spec, worktree.path, run_id=run_id),
+                codex.execute_task(task.spec, worktree.path, run_id=run_id),
             )
             if self.store.get_run_status(run_id) == RunStatus.CANCELLED:
                 raise _RunCancelled
@@ -519,12 +616,12 @@ class AgentBraidService:
             if result.outcome == TaskOutcome.SUCCEEDED and task.spec.mutates_workspace:
                 _require_success_evidence(task.spec, result)
                 async with self._lock(self._integration_locks, run_id):
-                    commit_sha = self.worktrees.commit_task(
+                    commit_sha = worktrees.commit_task(
                         worktree.path,
                         task.spec.task_id,
                         task.spec.title,
                     )
-                    self.worktrees.integrate_task(
+                    worktrees.integrate_task(
                         run_id,
                         task.spec.task_id,
                         integration_branch,
@@ -592,11 +689,13 @@ class AgentBraidService:
     async def _finalize_if_ready(self, run_id: str) -> None:
         async with self._lock(self._finalize_locks, run_id):
             run = self.store.get_run(run_id)
+            worktrees = self._worktrees_for_run(run)
+            codex = self._codex_for_run(run)
             if run.status not in {RunStatus.INTEGRATING, RunStatus.REVIEWING}:
                 return
             try:
                 async with self._lock(self._integration_locks, run_id):
-                    integration = self.worktrees.prepare_run(run_id, _integration_branch(run))
+                    integration = worktrees.prepare_run(run_id, _integration_branch(run))
             except WorktreeError as exc:
                 self.store.set_run_status(
                     run_id,
@@ -607,12 +706,12 @@ class AgentBraidService:
             if run.status == RunStatus.INTEGRATING:
                 self.store.set_run_status(run_id, RunStatus.REVIEWING)
             reviewing = self.store.get_run(run_id)
-            model = self.config.codex_model or "codex-default"
+            model = self._settings_for_run(run).codex_model or "codex-default"
             try:
                 invocation = await self._await_invocation(
                     run_id,
                     "final-review",
-                    self.codex.review_run(reviewing, integration.path),
+                    codex.review_run(reviewing, integration.path),
                 )
                 if self.store.get_run_status(run_id) == RunStatus.CANCELLED:
                     raise _RunCancelled
@@ -681,7 +780,8 @@ class AgentBraidService:
         return locks.setdefault(run_id, asyncio.Lock())
 
     def _touch_host_capability(self, run_id: str, host_id: str) -> None:
-        model = self.store.get_run(run_id).request.host_model
+        run = self.store.get_run(run_id)
+        model = self._settings_for_run(run).host_model
         try:
             current = self.store.get_capability(Executor.HOST, model)
         except StateError:
@@ -696,6 +796,101 @@ class AgentBraidService:
                 }
             )
         )
+
+    def _resolve_execution_settings(self, request: StartRunRequest) -> RunExecutionSettings:
+        defaults = self.config.default_workspace_settings(self.workspace)
+        saved = self.store.get_workspace_settings(str(self.workspace)) or defaults
+        overrides = request.execution
+
+        codex_model = overrides.codex_model if overrides is not None else None
+        if codex_model is None:
+            codex_model = saved.codex_model
+        if "AGENTBRAID_CODEX_MODEL" in os.environ:
+            codex_model = self.config.codex_model
+
+        host_model = saved.host_model
+        if request.host_model != "antigravity-auto":
+            host_model = request.host_model
+        if overrides is not None and overrides.host_model is not None:
+            host_model = overrides.host_model
+
+        delivery_mode = saved.delivery_mode
+        if request.delivery_mode != DeliveryMode.INTEGRATION_BRANCH:
+            delivery_mode = request.delivery_mode
+        if overrides is not None and overrides.delivery_mode is not None:
+            delivery_mode = overrides.delivery_mode
+
+        settings = RunExecutionSettings(
+            codex_binary=self.config.codex_binary,
+            codex_model=codex_model,
+            host_model=host_model,
+            routing_mode=(
+                overrides.routing_mode
+                if overrides is not None and overrides.routing_mode is not None
+                else saved.routing_mode
+            ),
+            delivery_mode=delivery_mode,
+            workspace_mode=(
+                overrides.workspace_mode
+                if overrides is not None and overrides.workspace_mode is not None
+                else saved.workspace_mode
+            ),
+            max_parallel_codex=_resolved_integer_setting(
+                overrides.max_parallel_codex if overrides is not None else None,
+                saved.max_parallel_codex,
+                defaults.max_parallel_codex,
+                "AGENTBRAID_MAX_PARALLEL_CODEX",
+            ),
+            max_task_attempts=_resolved_integer_setting(
+                overrides.max_task_attempts if overrides is not None else None,
+                saved.max_task_attempts,
+                defaults.max_task_attempts,
+                "AGENTBRAID_MAX_TASK_ATTEMPTS",
+            ),
+            codex_timeout_seconds=_resolved_integer_setting(
+                overrides.codex_timeout_seconds if overrides is not None else None,
+                saved.codex_timeout_seconds,
+                defaults.codex_timeout_seconds,
+                "AGENTBRAID_CODEX_TIMEOUT_SECONDS",
+            ),
+            max_output_bytes=_resolved_integer_setting(
+                overrides.max_output_bytes if overrides is not None else None,
+                saved.max_output_bytes,
+                defaults.max_output_bytes,
+                "AGENTBRAID_MAX_OUTPUT_BYTES",
+            ),
+            worktree_dir=str(self.config.worktree_dir),
+        )
+        return settings
+
+    def _settings_for_run(self, run: RunSnapshot) -> RunExecutionSettings:
+        return run.execution_settings or self._resolve_execution_settings(run.request)
+
+    def _config_for_run(self, run: RunSnapshot) -> AgentBraidConfig:
+        settings = self._settings_for_run(run)
+        return replace(
+            self.config,
+            codex_binary=settings.codex_binary,
+            codex_model=settings.codex_model,
+            codex_timeout_seconds=settings.codex_timeout_seconds,
+            max_parallel_codex=settings.max_parallel_codex,
+            max_output_bytes=settings.max_output_bytes,
+            max_task_attempts=settings.max_task_attempts,
+            worktree_dir=Path(settings.worktree_dir),
+        )
+
+    def _codex_for_run(self, run: RunSnapshot) -> CodexProvider:
+        if self._codex_override is not None:
+            return self._codex_override
+        return CodexAdapter(self._config_for_run(run))
+
+    def _worktrees_for_settings(self, settings: RunExecutionSettings) -> WorktreeManager:
+        if self._worktrees_override is not None:
+            return self._worktrees_override
+        return WorktreeManager(self.workspace, Path(settings.worktree_dir))
+
+    def _worktrees_for_run(self, run: RunSnapshot) -> WorktreeManager:
+        return self._worktrees_for_settings(self._settings_for_run(run))
 
     def _normalize_request(self, request: StartRunRequest) -> StartRunRequest:
         if request.workspace is not None:
@@ -732,6 +927,22 @@ def _provider_usage_record(
         reasoning_output_tokens=invocation.usage.reasoning_output_tokens,
         duration_seconds=invocation.duration_seconds,
     )
+
+
+def _resolved_integer_setting(
+    override: int | None,
+    saved: int,
+    environment_value: int,
+    environment_name: str,
+) -> int:
+    if environment_name in os.environ:
+        return environment_value
+    return override if override is not None else saved
+
+
+def _fallback_display_names(goal: str) -> LocalizedRunNames:
+    compact = " ".join(goal.split())[:100] or "AgentBraid run"
+    return LocalizedRunNames.model_validate({"en": compact, "zh-TW": compact, "zh-CN": compact})
 
 
 def _assert_not_child() -> None:

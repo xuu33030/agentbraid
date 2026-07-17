@@ -129,14 +129,21 @@ the cookie was cleared. A fixed port can be requested with `--port`, but only `1
 If the workspace is missing from **All projects**, confirm it has a persisted run in the active
 state database. The Dashboard does not scan other custom databases.
 
-## Dashboard cancel or apply is rejected
+## Dashboard start, cancel, delete, or apply is rejected
 
+- For start, select a concrete workspace and restart Dashboard and MCP after changing the Codex
+  executable or worktree directory.
 - Refresh the run and confirm it is still active before cancellation.
+- For delete, cancel active or blocked runs first. Resolve every dirty-worktree, unmerged-branch,
+  unique-patch, moved-workspace, or unverifiable-path blocker rather than forcing cleanup.
 - For apply, resolve every displayed blocker and type `apply-reviewed-run` exactly.
 - Keep the original branch and commit checked out and the primary workspace clean.
 - Do not edit the SQLite status directly; the MCP process monitors durable cancellation written by
   AgentBraid, not arbitrary database changes.
 - If the run workspace was moved or deleted, history remains viewable but apply is disabled.
+
+The Dashboard's Codex model changes actual Codex CLI invocations. Its AGY model value is only a
+routing label and cannot change the model selected by Antigravity. Choose that model in AGY.
 
 ## Provider timeout, quota, or unavailable errors
 

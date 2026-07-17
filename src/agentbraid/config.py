@@ -9,6 +9,7 @@ from typing import Any
 from platformdirs import user_state_path
 
 from agentbraid.errors import ConfigurationError
+from agentbraid.models import WorkspaceSettings
 from agentbraid.security import is_codex_binary
 
 
@@ -107,6 +108,26 @@ class AgentBraidConfig:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.worktree_dir.mkdir(parents=True, exist_ok=True)
+
+    def default_workspace_settings(self, workspace: Path) -> WorkspaceSettings:
+        return WorkspaceSettings(
+            workspace=str(workspace.expanduser().resolve()),
+            codex_binary=self.codex_binary,
+            codex_model=self.codex_model,
+            max_parallel_codex=min(self.max_parallel_codex, 8),
+            max_task_attempts=min(self.max_task_attempts, 3),
+            codex_timeout_seconds=min(max(self.codex_timeout_seconds, 60), 7200),
+            max_output_bytes=min(max(self.max_output_bytes, 1024 * 1024), 100 * 1024 * 1024),
+            worktree_dir=str(self.worktree_dir.expanduser().resolve()),
+        )
+
+    def with_workspace_runtime(self, settings: WorkspaceSettings) -> AgentBraidConfig:
+        values: dict[str, object] = {}
+        if "AGENTBRAID_CODEX_BINARY" not in os.environ:
+            values["codex_binary"] = settings.codex_binary
+        if "AGENTBRAID_WORKTREE_DIR" not in os.environ:
+            values["worktree_dir"] = settings.worktree_dir
+        return self._with_mapping(values)
 
 
 def _load_toml(path: Path) -> dict[str, object]:

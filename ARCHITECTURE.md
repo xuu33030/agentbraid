@@ -21,7 +21,7 @@ flowchart TB
         codex["Codex CLI<br/>authenticated user session"]
     end
 
-    subgraph agentbraid["AgentBraid MCP process"]
+    subgraph agentbraid["AgentBraid service and MCP process"]
         mcp["FastMCP stdio server"]
         scheduler["Planner and deterministic router"]
         integrator["Worktree and integration manager"]
@@ -43,8 +43,9 @@ flowchart TB
     scheduler -->|"codex exec --json"| codex
     scheduler --> store
     scheduler --> integrator
+    dashboard -->|"start / settings"| scheduler
     dashboard --> store
-    dashboard -->|"cancel / explicit apply"| integrator
+    dashboard -->|"cancel / safe cleanup / explicit apply"| integrator
     host -->|"edits only claimed worktree"| tasks
     codex -->|"bounded worker edits"| tasks
     integrator --> tasks
@@ -76,16 +77,24 @@ v0.1 weights and hard availability rules are documented in `docs/routing.md`.
 
 ### State store
 
-SQLite records runs, tasks, dependencies, attempts, events, capabilities, worktrees, and review
-findings. Schema v3 also denormalizes the run workspace and attributes provider usage to task
-attempts and outcomes. Runtime state lives outside the repository by default.
+SQLite records runs, tasks, dependencies, attempts, events, capabilities, worktrees, review
+findings, localized run names, immutable execution snapshots, and workspace settings. Schema v4
+retains schema v3 workspace and provider-usage attribution while adding the Dashboard execution
+metadata. Runtime state lives outside the repository by default.
 
 ### Local Dashboard
 
 `agentbraid dashboard` is a separate process that serves bundled HTML, CSS, and JavaScript on an
 authenticated `127.0.0.1` session. It lists runs from one active state database, derives token
 breakdowns without double-counting cached or reasoning subsets, and invokes the same service and
-worktree safety checks for explicit apply. It cannot start a run or execute host work.
+worktree safety checks for run creation, cancellation, cleanup, and explicit apply. The Dashboard
+may launch the official Codex CLI with a selected model, but it cannot execute host work or launch
+Antigravity; AGY model values remain routing metadata for the authenticated MCP host.
+
+Each run stores its resolved execution settings so later workspace-default changes cannot alter an
+existing run's model, routing, worktree, timeout, retry, or output-limit contract. Runtime path
+changes require a Dashboard and MCP restart. Selected-run cleanup is fail-closed and revalidates
+dirty worktrees and branch uniqueness immediately before deleting the database record.
 
 Because the Dashboard can cancel a run owned by the MCP process, every planning, worker, and
 review invocation races provider completion against the durable cancelled status. Same-process
@@ -132,8 +141,9 @@ sequenceDiagram
     Braid->>Git: Fast-forward current branch only
 ```
 
-The optional Dashboard observes the same persisted lifecycle and can issue cancellation or the
-same explicitly confirmed apply operation. It does not replace Antigravity as the MCP host.
+The optional Dashboard can start the same persisted lifecycle, issue cancellation, safely delete
+terminal history, or perform the same explicitly confirmed apply operation. Hybrid runs still need
+Antigravity to claim host-assigned work; the Dashboard does not replace it as the MCP host.
 
 ```text
 created -> planning -> running -> integrating -> reviewing -> completed

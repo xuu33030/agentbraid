@@ -25,7 +25,7 @@ will keep on disk:
 ```bash
 python -m venv ~/.venvs/agentbraid
 source ~/.venvs/agentbraid/bin/activate
-python -m pip install /path/to/agentbraid-0.2.0a1-py3-none-any.whl
+python -m pip install /path/to/agentbraid-0.2.0a2-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -34,7 +34,7 @@ Windows PowerShell:
 ```powershell
 py -3.13 -m venv $HOME\.venvs\agentbraid
 & $HOME\.venvs\agentbraid\Scripts\Activate.ps1
-python -m pip install C:\path\to\agentbraid-0.2.0a1-py3-none-any.whl
+python -m pip install C:\path\to\agentbraid-0.2.0a2-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -167,8 +167,9 @@ Use the language selector to switch between **繁體中文**, **简体中文**, 
 first visit, the Dashboard follows the browser language and falls back to English. The selected
 locale is stored as a non-sensitive, SameSite-strict preference cookie on `127.0.0.1`, so it remains
 available when a later Dashboard process chooses a different loopback port. User goals, task
-content, Git values, model output, and raw diagnostics remain unchanged rather than being
-translated.
+content, Git values, and raw diagnostics remain unchanged. New runs receive separate editable
+English, Traditional Chinese, and Simplified Chinese display names during the existing Codex
+planning call; the original goal is always retained.
 
 The run view provides:
 
@@ -176,7 +177,26 @@ The run view provides:
 - durable run/task event timeline;
 - observed Codex input, cached input, output, reasoning, duration, and retry attribution;
 - capability health and final delivery readiness;
-- explicit cancellation and reviewed fast-forward apply controls.
+- direct run creation with Codex model and execution controls;
+- per-workspace defaults, localized run-name editing, and observed model suggestions;
+- explicit cancellation, selected-history cleanup, and reviewed fast-forward apply controls.
+
+Choose **Start run** to select a known workspace and configure the run. The Codex model field is
+passed to the official Codex CLI. The AGY model field is only a routing label used for host-task
+capability history; the Dashboard does not launch Antigravity or choose its actual model. Hybrid
+routing may therefore pause for the authenticated Antigravity MCP host to claim a host-assigned
+task. Choose **Codex-only** when every task must stay with Codex, or **Read-only** when the planned
+task graph must not contain workspace mutations.
+
+Choose **Settings** to save workspace defaults. Changes to the Codex executable or managed
+worktree directory require restarting both Dashboard and MCP processes; database and state paths
+are displayed read-only. Environment-variable settings remain locked and take precedence.
+
+To clear history, select visible runs and choose **Delete selected**. After the exact confirmation,
+AgentBraid deletes each run's SQLite records together with its safely removable managed worktrees
+and branches. A dirty worktree, unmerged integration branch, unique task patch, active run, moved
+workspace, or unverifiable path blocks that run's deletion without forcing cleanup; other safe
+selections may still be deleted.
 
 On narrow screens, run history is collapsed after a run is selected. Use **Show runs** to choose a
 different run. Provider usage is presented as labeled cards, and task graphs scroll horizontally

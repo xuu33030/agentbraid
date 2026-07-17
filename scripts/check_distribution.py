@@ -10,7 +10,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-PACKAGE_VERSION = "0.2.0a1"
+PACKAGE_VERSION = "0.2.0a2"
 
 
 def has_suffix(names: list[str], suffix: str) -> bool:

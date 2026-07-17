@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agentbraid.errors import WorktreeConflictError, WorktreeError
+from agentbraid.models import RunSnapshot, RunStatus, StartRunRequest, utc_now
 from agentbraid.worktrees import WorktreeManager
 
 
@@ -158,3 +159,27 @@ def test_apply_rejects_a_different_primary_branch(tmp_path: Path) -> None:
             expected_branch=target.branch,
             expected_commit=target.commit,
         )
+
+
+def test_cleanup_blocks_when_repository_identity_cannot_be_verified(tmp_path: Path) -> None:
+    root, manager = repository(tmp_path)
+    run_id = "run-replaced-repository"
+    branch = "agentbraid/run-replaced-repository"
+    manager.prepare_run(run_id, branch)
+    now = utc_now()
+    run = RunSnapshot(
+        run_id=run_id,
+        request=StartRunRequest(goal="Preserve local artifacts.", workspace=str(root)),
+        status=RunStatus.CANCELLED,
+        integration_branch=branch,
+        base_branch="main",
+        base_commit="f" * 40,
+        created_at=now,
+        updated_at=now,
+    )
+
+    preview = manager.preview_run_cleanup(run)
+
+    assert preview.deletable is False
+    assert "run base commit is missing" in " ".join(preview.blockers)
+    assert manager.integration_path(run_id).exists()

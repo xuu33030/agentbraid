@@ -334,6 +334,30 @@ input {
   line-height: 1.5;
 }
 
+.selection-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.selection-toolbar label,
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.selection-toolbar input,
+.checkbox-field input,
+.run-select input {
+  width: 16px;
+  min-height: 16px;
+}
+
 .run-list {
   display: grid;
   gap: 8px;
@@ -349,6 +373,18 @@ input {
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.run-item-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+}
+
+.run-select {
+  display: grid;
+  place-items: center;
 }
 
 .run-item:hover {
@@ -423,6 +459,13 @@ input {
   max-width: 900px;
   margin-top: 10px;
   line-height: 1.3;
+}
+
+.run-original-goal {
+  max-width: 900px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .status-line {
@@ -891,11 +934,17 @@ td.number {
 
 dialog {
   width: min(480px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
   padding: 0;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 15px;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+dialog.wide-dialog {
+  width: min(820px, calc(100% - 32px));
 }
 
 dialog::backdrop {
@@ -905,6 +954,92 @@ dialog::backdrop {
 
 .dialog-content {
   padding: 22px;
+}
+
+.settings-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settings-form > .eyebrow,
+.settings-form > h2,
+.settings-form > .full-span {
+  grid-column: 1 / -1;
+}
+
+.settings-form label,
+#rename-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+textarea {
+  width: 100%;
+  padding: 10px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+}
+
+.cleanup-preview {
+  display: grid;
+  gap: 10px;
+  max-height: 45vh;
+  margin: 14px 0;
+  overflow-y: auto;
+}
+
+.cleanup-item {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.cleanup-item.blocked {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: var(--danger-soft);
+}
+
+.cleanup-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cleanup-state {
+  flex: 0 0 auto;
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cleanup-state.blocked,
+.cleanup-artifacts .blocked,
+.cleanup-blocker {
+  color: var(--danger);
+}
+
+.cleanup-artifacts {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.cleanup-blocker {
+  margin: 8px 0 0 !important;
+  font-size: 11px;
 }
 
 .dialog-content > p:not(.eyebrow) {
@@ -963,6 +1098,14 @@ code {
 }
 
 @media (max-width: 800px) {
+  .settings-form {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-form > * {
+    grid-column: 1;
+  }
+
   .topbar {
     position: static;
     align-items: flex-start;
