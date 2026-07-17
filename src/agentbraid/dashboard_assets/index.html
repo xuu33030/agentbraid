@@ -13,46 +13,94 @@
     <div class="brand-block">
       <div class="brand-mark" aria-hidden="true">AB</div>
       <div>
-        <p class="eyebrow">LOCAL ORCHESTRATION</p>
-        <h1>AgentBraid Dashboard</h1>
+        <p class="eyebrow" data-i18n="brand.eyebrow">LOCAL ORCHESTRATION</p>
+        <h1 data-i18n="app.title">AgentBraid Dashboard</h1>
       </div>
     </div>
     <div class="topbar-actions">
       <label class="workspace-control">
-        <span>Workspace</span>
-        <select id="workspace-select" aria-label="Workspace filter">
-          <option value="">All projects</option>
+        <span data-i18n="control.workspace">Workspace</span>
+        <select
+          id="workspace-select"
+          aria-label="Workspace filter"
+          data-i18n-aria-label="control.workspaceAria"
+        >
+          <option value="" data-i18n="workspace.all">All projects</option>
         </select>
       </label>
-      <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+      <label class="language-control">
+        <span data-i18n="control.language">Language</span>
+        <select
+          id="language-select"
+          aria-label="Dashboard language"
+          data-i18n-aria-label="control.languageAria"
+        >
+          <option value="zh-TW">繁體中文</option>
+          <option value="zh-CN">简体中文</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <button id="refresh-button" class="button secondary" type="button" data-i18n="action.refresh">
+        Refresh
+      </button>
       <div id="connection-state" class="connection-state" role="status" aria-live="polite">
         <span class="connection-dot" aria-hidden="true"></span>
-        <span>Connecting</span>
+        <span data-i18n="connection.connecting">Connecting</span>
       </div>
     </div>
   </header>
 
   <main class="workspace-layout">
-    <aside class="run-sidebar" aria-label="AgentBraid runs">
+    <aside
+      class="run-sidebar"
+      aria-label="AgentBraid runs"
+      data-i18n-aria-label="sidebar.aria"
+    >
       <div class="sidebar-heading">
         <div>
-          <p class="eyebrow">RUN HISTORY</p>
-          <h2>Runs</h2>
+          <p class="eyebrow" data-i18n="sidebar.eyebrow">RUN HISTORY</p>
+          <h2 data-i18n="sidebar.title">Runs</h2>
         </div>
-        <span id="run-count" class="count-badge">0</span>
+        <div class="sidebar-tools">
+          <span id="run-count" class="count-badge">0</span>
+          <button
+            id="run-list-toggle"
+            class="button secondary run-list-toggle"
+            type="button"
+            aria-controls="run-list-region"
+            aria-expanded="false"
+            hidden
+          >
+            Show runs
+          </button>
+        </div>
       </div>
-      <div id="scope-summary" class="scope-summary" aria-live="polite"></div>
-      <div id="run-list" class="run-list"></div>
-      <button id="load-more-button" class="button secondary full-width" type="button" hidden>
-        Load more
-      </button>
+      <div id="run-list-region" class="run-list-region">
+        <div id="scope-summary" class="scope-summary" aria-live="polite"></div>
+        <div id="run-list" class="run-list"></div>
+        <button
+          id="load-more-button"
+          class="button secondary full-width"
+          type="button"
+          data-i18n="action.loadMore"
+          hidden
+        >
+          Load more
+        </button>
+      </div>
     </aside>
 
-    <section class="detail-pane" aria-label="Selected run details">
+    <section
+      class="detail-pane"
+      aria-label="Selected run details"
+      data-i18n-aria-label="detail.aria"
+    >
       <div id="empty-state" class="empty-state">
         <div class="empty-glyph" aria-hidden="true">◇</div>
-        <h2>Select a run</h2>
-        <p>Inspect task dependencies, execution events, token allocation, and delivery safety.</p>
+        <h2 data-i18n="empty.title">Select a run</h2>
+        <p data-i18n="empty.description">
+          Inspect task dependencies, execution events, token allocation, and delivery safety.
+        </p>
       </div>
 
       <div id="run-detail" hidden>
@@ -62,35 +110,46 @@
               <span id="run-status" class="status-pill"></span>
               <span id="run-id" class="mono subtle"></span>
             </div>
-            <h2 id="run-goal"></h2>
+            <h2 id="run-goal" tabindex="-1"></h2>
             <p id="run-workspace" class="mono subtle path-text"></p>
           </div>
-          <div class="run-actions">
-            <button id="cancel-button" class="button danger" type="button">Cancel run</button>
-            <button id="apply-button" class="button primary" type="button">Apply reviewed run</button>
+          <div class="run-action-stack">
+            <div class="run-actions">
+              <button id="cancel-button" class="button danger" type="button" data-i18n="action.cancelRun">
+                Cancel run
+              </button>
+              <button id="apply-button" class="button primary" type="button" data-i18n="action.applyReviewed">
+                Apply reviewed run
+              </button>
+            </div>
+            <p id="apply-action-hint" class="action-hint" role="note" hidden></p>
           </div>
         </header>
 
         <div id="action-message" class="message" role="status" aria-live="polite" hidden></div>
 
-        <section class="metric-grid" aria-label="Run metrics">
+        <section
+          class="metric-grid"
+          aria-label="Run metrics"
+          data-i18n-aria-label="metrics.aria"
+        >
           <article class="metric-card">
-            <span>Observed tokens</span>
+            <span data-i18n="metrics.observedTokens">Observed tokens</span>
             <strong id="metric-total-tokens">0</strong>
-            <small>input + output</small>
+            <small data-i18n="metrics.inputOutput">input + output</small>
           </article>
           <article class="metric-card">
-            <span>Input cache ratio</span>
+            <span data-i18n="metrics.cacheRatio">Input cache ratio</span>
             <strong id="metric-cache-ratio">0%</strong>
             <small id="metric-cached-tokens">0 cached</small>
           </article>
           <article class="metric-card">
-            <span>Retry overhead</span>
+            <span data-i18n="metrics.retryOverhead">Retry overhead</span>
             <strong id="metric-retry-tokens">0</strong>
-            <small>earlier task attempts</small>
+            <small data-i18n="metrics.earlierAttempts">earlier task attempts</small>
           </article>
           <article class="metric-card">
-            <span>Provider duration</span>
+            <span data-i18n="metrics.providerDuration">Provider duration</span>
             <strong id="metric-duration">0s</strong>
             <small id="metric-invocations">0 invocations</small>
           </article>
@@ -99,17 +158,29 @@
         <section class="panel">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">EXECUTION PLAN</p>
-              <h3>Task dependency graph</h3>
+              <p class="eyebrow" data-i18n="panel.executionPlan">EXECUTION PLAN</p>
+              <h3 data-i18n="panel.taskGraph">Task dependency graph</h3>
             </div>
-            <div class="legend" aria-label="Task executor legend">
-              <span><i class="legend-dot codex"></i>Codex</span>
-              <span><i class="legend-dot host"></i>Host</span>
+            <div
+              class="legend"
+              aria-label="Task executor legend"
+              data-i18n-aria-label="dag.legendAria"
+            >
+              <span><i class="legend-dot codex"></i><span data-i18n="executor.codex">Codex</span></span>
+              <span><i class="legend-dot host"></i><span data-i18n="executor.host">Host</span></span>
             </div>
           </div>
           <div id="dag-container" class="dag-container">
-            <svg id="task-dag" role="img" aria-label="Task dependency graph"></svg>
+            <svg
+              id="task-dag"
+              role="img"
+              aria-label="Task dependency graph"
+              data-i18n-aria-label="dag.aria"
+            ></svg>
           </div>
+          <p id="dag-scroll-hint" class="subtle note scroll-hint" data-i18n="dag.scrollHint" hidden>
+            Scroll horizontally to inspect the remaining task graph.
+          </p>
           <div id="task-detail" class="task-detail" aria-live="polite"></div>
         </section>
 
@@ -117,8 +188,8 @@
           <article class="panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">TOKEN ALLOCATION</p>
-                <h3>Usage by phase</h3>
+                <p class="eyebrow" data-i18n="panel.tokenAllocation">TOKEN ALLOCATION</p>
+                <h3 data-i18n="panel.usageByPhase">Usage by phase</h3>
               </div>
             </div>
             <div id="usage-chart" class="usage-chart"></div>
@@ -128,8 +199,8 @@
           <article class="panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">MODEL HEALTH</p>
-                <h3>Observed capabilities</h3>
+                <p class="eyebrow" data-i18n="panel.modelHealth">MODEL HEALTH</p>
+                <h3 data-i18n="panel.observedCapabilities">Observed capabilities</h3>
               </div>
             </div>
             <div id="capability-list" class="capability-list"></div>
@@ -139,23 +210,23 @@
         <section class="panel">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">INVOCATION DETAIL</p>
-              <h3>Provider usage</h3>
+              <p class="eyebrow" data-i18n="panel.invocationDetail">INVOCATION DETAIL</p>
+              <h3 data-i18n="panel.providerUsage">Provider usage</h3>
             </div>
           </div>
           <div class="table-wrap">
-            <table>
+            <table class="usage-table">
               <thead>
                 <tr>
-                  <th>Phase / task</th>
-                  <th>Model</th>
-                  <th>Attempt</th>
-                  <th>Outcome</th>
-                  <th>Input</th>
-                  <th>Cached</th>
-                  <th>Output</th>
-                  <th>Reasoning</th>
-                  <th>Duration</th>
+                  <th data-i18n="table.phaseTask">Phase / task</th>
+                  <th data-i18n="table.model">Model</th>
+                  <th data-i18n="table.attempt">Attempt</th>
+                  <th data-i18n="table.outcome">Outcome</th>
+                  <th data-i18n="table.input">Input</th>
+                  <th data-i18n="table.cached">Cached</th>
+                  <th data-i18n="table.output">Output</th>
+                  <th data-i18n="table.reasoning">Reasoning</th>
+                  <th data-i18n="table.duration">Duration</th>
                 </tr>
               </thead>
               <tbody id="usage-table-body"></tbody>
@@ -167,8 +238,8 @@
           <article class="panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">DURABLE TRACE</p>
-                <h3>Event timeline</h3>
+                <p class="eyebrow" data-i18n="panel.durableTrace">DURABLE TRACE</p>
+                <h3 data-i18n="panel.eventTimeline">Event timeline</h3>
               </div>
             </div>
             <ol id="event-timeline" class="timeline"></ol>
@@ -177,8 +248,8 @@
           <article class="panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">DELIVERY</p>
-                <h3>Review and Git target</h3>
+                <p class="eyebrow" data-i18n="panel.delivery">DELIVERY</p>
+                <h3 data-i18n="panel.reviewGitTarget">Review and Git target</h3>
               </div>
             </div>
             <dl id="delivery-detail" class="definition-list"></dl>
@@ -192,29 +263,41 @@
 
   <dialog id="cancel-dialog">
     <form method="dialog" class="dialog-content">
-      <p class="eyebrow">DESTRUCTIVE ACTION</p>
-      <h2>Cancel this run?</h2>
-      <p>Active provider work will be stopped and unfinished tasks will be marked cancelled.</p>
+      <p class="eyebrow" data-i18n="dialog.destructive">DESTRUCTIVE ACTION</p>
+      <h2 data-i18n="dialog.cancelTitle">Cancel this run?</h2>
+      <p data-i18n="dialog.cancelDescription">
+        Active provider work will be stopped and unfinished tasks will be marked cancelled.
+      </p>
       <div class="dialog-actions">
-        <button class="button secondary" value="close">Keep running</button>
-        <button id="confirm-cancel-button" class="button danger" value="confirm">Cancel run</button>
+        <button class="button secondary" value="close" data-i18n="action.keepRunning">Keep running</button>
+        <button id="confirm-cancel-button" class="button danger" value="confirm" data-i18n="action.cancelRun">
+          Cancel run
+        </button>
       </div>
     </form>
   </dialog>
 
   <dialog id="apply-dialog">
     <form id="apply-form" class="dialog-content">
-      <p class="eyebrow">REVIEWED DELIVERY</p>
-      <h2>Apply the integration branch?</h2>
-      <p>The primary workspace will be fast-forwarded only if its branch, commit, and cleanliness still match.</p>
+      <p class="eyebrow" data-i18n="dialog.reviewedDelivery">REVIEWED DELIVERY</p>
+      <h2 data-i18n="dialog.applyTitle">Apply the integration branch?</h2>
+      <p data-i18n="dialog.applyDescription">
+        The primary workspace will be fast-forwarded only if its branch, commit, and cleanliness still match.
+      </p>
       <label class="confirmation-field">
-        <span>Type <code>apply-reviewed-run</code> to confirm</span>
+        <span>
+          <span data-i18n="dialog.type">Type</span>
+          <code>apply-reviewed-run</code>
+          <span data-i18n="dialog.toConfirm">to confirm</span>
+        </span>
         <input id="apply-confirmation" autocomplete="off" spellcheck="false">
       </label>
       <div class="dialog-actions">
-        <button id="close-apply-dialog" class="button secondary" type="button">Close</button>
+        <button id="close-apply-dialog" class="button secondary" type="button" data-i18n="action.close">
+          Close
+        </button>
         <button id="confirm-apply-button" class="button primary" type="submit" disabled>
-          Apply reviewed run
+          <span data-i18n="action.applyReviewed">Apply reviewed run</span>
         </button>
       </div>
     </form>

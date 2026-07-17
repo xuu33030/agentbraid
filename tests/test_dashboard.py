@@ -182,6 +182,7 @@ def test_dashboard_requires_bootstrap_session_and_security_headers(tmp_path: Pat
 
     unauthorized = client.get("/api/v1/meta")
     assert unauthorized.status_code == 403
+    assert client.get("/assets/locales.json").status_code == 403
     authenticated = client.get(f"/bootstrap?token={security.bootstrap_token}")
     assert authenticated.status_code == 303
     assert authenticated.headers["location"] == "/"
@@ -198,6 +199,40 @@ def test_dashboard_requires_bootstrap_session_and_security_headers(tmp_path: Pat
     script = client.get("/assets/app.js")
     assert script.status_code == 200
     assert "innerHTML" not in script.text
+    assert "agentbraid_dashboard_locale" in script.text
+    assert "localStorage" not in script.text
+    locales = client.get("/assets/locales.json")
+    assert locales.status_code == 200
+    assert locales.headers["content-type"].startswith("application/json")
+    assert client.get("/assets/missing.json").status_code == 404
+
+
+def test_dashboard_locales_have_matching_complete_key_sets(tmp_path: Path) -> None:
+    config = dashboard_config(tmp_path)
+    store = StateStore(config.database_path)
+    client, security = dashboard_client(config, store, None)
+    authenticate(client, security)
+
+    locales = client.get("/assets/locales.json").json()
+    assert set(locales) == {"en", "zh-TW", "zh-CN"}
+    key_sets = {locale: set(messages) for locale, messages in locales.items()}
+    assert key_sets["en"] == key_sets["zh-TW"] == key_sets["zh-CN"]
+    assert {
+        "app.title",
+        "control.languageAria",
+        "sidebar.showRuns",
+        "actions.applyBlocked",
+        "status.completed",
+        "phase.task",
+        "event.run.status_changed",
+        "deliveryMode.integration_branch",
+        "toast.languageChanged",
+    } <= key_sets["en"]
+    assert all(
+        isinstance(message, str) and message.strip()
+        for messages in locales.values()
+        for message in messages.values()
+    )
 
 
 def test_dashboard_lists_scoped_runs_and_usage(tmp_path: Path) -> None:

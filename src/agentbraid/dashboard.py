@@ -370,9 +370,14 @@ def create_dashboard_app(
     async def asset(request: Request) -> Response:
         _require_session(request, security)
         name = request.path_params["name"]
-        if name not in {"app.css", "app.js"}:
+        if name not in {"app.css", "app.js", "locales.json"}:
             return _error_response("asset_not_found", "Dashboard asset not found", 404)
-        media_type = "text/css" if name.endswith(".css") else "text/javascript"
+        media_types = {
+            "app.css": "text/css",
+            "app.js": "text/javascript",
+            "locales.json": "application/json",
+        }
+        media_type = media_types[name]
         return Response(_asset_text(name), media_type=media_type)
 
     async def metadata(request: Request) -> Response:

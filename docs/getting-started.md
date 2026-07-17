@@ -163,6 +163,13 @@ projects** view for every workspace recorded in the active state database. Use `
 the one-time browser URL without launching the default browser, or `--port 8123` to request a fixed
 loopback port. The Dashboard never binds to a remote interface.
 
+Use the language selector to switch between **繁體中文**, **简体中文**, and **English**. On the
+first visit, the Dashboard follows the browser language and falls back to English. The selected
+locale is stored as a non-sensitive, SameSite-strict preference cookie on `127.0.0.1`, so it remains
+available when a later Dashboard process chooses a different loopback port. User goals, task
+content, Git values, model output, and raw diagnostics remain unchanged rather than being
+translated.
+
 The run view provides:
 
 - dependency-aware task DAG and executor assignments;
@@ -170,6 +177,10 @@ The run view provides:
 - observed Codex input, cached input, output, reasoning, duration, and retry attribution;
 - capability health and final delivery readiness;
 - explicit cancellation and reviewed fast-forward apply controls.
+
+On narrow screens, run history is collapsed after a run is selected. Use **Show runs** to choose a
+different run. Provider usage is presented as labeled cards, and task graphs scroll horizontally
+only when their dependency layout is wider than the available panel.
 
 Observed total tokens equal input plus output. Cached input is a subset of input, and reasoning is
 a subset of output, so neither is added twice. Historical schema v2 usage is shown as legacy data

@@ -2,25 +2,42 @@
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PAGE_SIZE = 50;
+const SUPPORTED_LOCALES = new Set(["en", "zh-TW", "zh-CN"]);
+const LOCALE_COOKIE_NAME = "agentbraid_dashboard_locale";
+const LOCALE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
+const MOBILE_BREAKPOINT = window.matchMedia("(max-width: 800px)");
 const csrfToken = document.querySelector('meta[name="agentbraid-csrf"]').content;
 
 const state = {
+  locale: "en",
+  messages: {},
+  translationsAvailable: false,
   meta: null,
   workspaces: [],
   runs: [],
   capabilities: [],
   selectedRunId: null,
+  selectedTaskId: null,
   detail: null,
   offset: 0,
   hasMore: false,
   pollInFlight: false,
+  mobileRunListExpanded: false,
+  connection: {
+    status: "",
+    key: "connection.connecting",
+    fallback: "Connecting",
+  },
 };
 
 const elements = {
   workspaceSelect: document.getElementById("workspace-select"),
+  languageSelect: document.getElementById("language-select"),
   refreshButton: document.getElementById("refresh-button"),
   connectionState: document.getElementById("connection-state"),
   runCount: document.getElementById("run-count"),
+  runListToggle: document.getElementById("run-list-toggle"),
+  runListRegion: document.getElementById("run-list-region"),
   scopeSummary: document.getElementById("scope-summary"),
   runList: document.getElementById("run-list"),
   loadMoreButton: document.getElementById("load-more-button"),
@@ -32,6 +49,7 @@ const elements = {
   runWorkspace: document.getElementById("run-workspace"),
   cancelButton: document.getElementById("cancel-button"),
   applyButton: document.getElementById("apply-button"),
+  applyActionHint: document.getElementById("apply-action-hint"),
   actionMessage: document.getElementById("action-message"),
   totalTokens: document.getElementById("metric-total-tokens"),
   cacheRatio: document.getElementById("metric-cache-ratio"),
@@ -39,7 +57,9 @@ const elements = {
   retryTokens: document.getElementById("metric-retry-tokens"),
   duration: document.getElementById("metric-duration"),
   invocations: document.getElementById("metric-invocations"),
+  dagContainer: document.getElementById("dag-container"),
   taskDag: document.getElementById("task-dag"),
+  dagScrollHint: document.getElementById("dag-scroll-hint"),
   taskDetail: document.getElementById("task-detail"),
   usageChart: document.getElementById("usage-chart"),
   legacyNote: document.getElementById("legacy-note"),
@@ -58,6 +78,201 @@ const elements = {
   closeApplyDialog: document.getElementById("close-apply-dialog"),
   toast: document.getElementById("toast"),
 };
+
+const valueLabels = {
+  status: {
+    created: ["status.created", "Created"],
+    planning: ["status.planning", "Planning"],
+    running: ["status.running", "Running"],
+    integrating: ["status.integrating", "Integrating"],
+    reviewing: ["status.reviewing", "Reviewing"],
+    completed: ["status.completed", "Completed"],
+    blocked: ["status.blocked", "Blocked"],
+    cancelled: ["status.cancelled", "Cancelled"],
+    failed: ["status.failed", "Failed"],
+    pending: ["status.pending", "Pending"],
+    ready: ["status.ready", "Ready"],
+    retrying: ["status.retrying", "Retrying"],
+    succeeded: ["status.succeeded", "Succeeded"],
+    healthy: ["status.healthy", "Healthy"],
+    constrained: ["status.constrained", "Constrained"],
+    cooldown: ["status.cooldown", "Cooldown"],
+    unavailable: ["status.unavailable", "Unavailable"],
+  },
+  executor: {
+    codex: ["executor.codex", "Codex"],
+    host: ["executor.host", "Host"],
+  },
+  outcome: {
+    succeeded: ["status.succeeded", "Succeeded"],
+    failed: ["status.failed", "Failed"],
+    blocked: ["status.blocked", "Blocked"],
+    approved: ["outcome.approved", "Approved"],
+    rejected: ["outcome.rejected", "Rejected"],
+  },
+  phase: {
+    planning: ["phase.planning", "Planning"],
+    task: ["phase.task", "Task"],
+    review: ["phase.review", "Review"],
+  },
+  deliveryMode: {
+    integration_branch: ["deliveryMode.integration_branch", "Integration branch"],
+    report_only: ["deliveryMode.report_only", "Report only"],
+  },
+  usageSegment: {
+    uncached: ["usage.segment.uncached", "uncached"],
+    cached: ["usage.segment.cached", "cached"],
+    output: ["usage.segment.output", "output"],
+    reasoning: ["usage.segment.reasoning", "reasoning"],
+  },
+};
+
+function interpolate(template, parameters = {}) {
+  return String(template).replace(/\{([a-zA-Z0-9_]+)\}/g, (match, name) => {
+    return Object.hasOwn(parameters, name) ? String(parameters[name]) : match;
+  });
+}
+
+function t(key, fallback = key, parameters = {}) {
+  const template = state.messages[state.locale]?.[key]
+    ?? state.messages.en?.[key]
+    ?? fallback;
+  return interpolate(template, parameters);
+}
+
+function translatedValue(group, value) {
+  if (value === undefined || value === null || value === "") {
+    return value;
+  }
+  const entry = valueLabels[group]?.[value];
+  return entry ? t(entry[0], entry[1]) : String(value);
+}
+
+function cookieValue(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  for (const part of document.cookie.split(";")) {
+    const candidate = part.trim();
+    if (candidate.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(candidate.slice(prefix.length));
+      } catch (_error) {
+        return "";
+      }
+    }
+  }
+  return "";
+}
+
+function localeForLanguage(value) {
+  const locale = String(value || "").replaceAll("_", "-").toLowerCase();
+  if (locale === "en" || locale.startsWith("en-")) {
+    return "en";
+  }
+  if (!locale.startsWith("zh")) {
+    return null;
+  }
+  if (
+    locale.includes("hant")
+    || locale === "zh-tw"
+    || locale.startsWith("zh-tw-")
+    || locale === "zh-hk"
+    || locale.startsWith("zh-hk-")
+    || locale === "zh-mo"
+    || locale.startsWith("zh-mo-")
+  ) {
+    return "zh-TW";
+  }
+  return "zh-CN";
+}
+
+function resolveInitialLocale() {
+  const saved = cookieValue(LOCALE_COOKIE_NAME);
+  if (SUPPORTED_LOCALES.has(saved)) {
+    return saved;
+  }
+  const candidates = Array.isArray(navigator.languages) && navigator.languages.length
+    ? navigator.languages
+    : [navigator.language];
+  for (const candidate of candidates) {
+    const locale = localeForLanguage(candidate);
+    if (locale) {
+      return locale;
+    }
+  }
+  return "en";
+}
+
+function persistLocale(locale) {
+  document.cookie = `${encodeURIComponent(LOCALE_COOKIE_NAME)}=${encodeURIComponent(locale)}`
+    + `; Max-Age=${LOCALE_COOKIE_MAX_AGE}; Path=/; SameSite=Strict`;
+}
+
+async function loadTranslations() {
+  try {
+    const response = await fetch("/assets/locales.json", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`locale asset failed (${response.status})`);
+    }
+    const payload = await response.json();
+    if (![...SUPPORTED_LOCALES].every((locale) => payload[locale])) {
+      throw new Error("locale asset is missing a supported language");
+    }
+    state.messages = payload;
+    state.translationsAvailable = true;
+  } catch (error) {
+    state.locale = "en";
+    state.messages = {};
+    state.translationsAvailable = false;
+    elements.languageSelect.disabled = true;
+    elements.languageSelect.title = "Translations unavailable; English remains available.";
+    console.warn("AgentBraid locale asset unavailable; using English.", error);
+  }
+}
+
+function applyStaticTranslations() {
+  document.documentElement.lang = state.locale;
+  document.title = t("app.title", "AgentBraid Dashboard");
+  for (const element of document.querySelectorAll("[data-i18n]")) {
+    const fallback = element.dataset.i18nFallback ?? element.textContent.trim();
+    element.dataset.i18nFallback = fallback;
+    element.textContent = t(element.dataset.i18n, fallback);
+  }
+  for (const element of document.querySelectorAll("[data-i18n-aria-label]")) {
+    const fallback = element.dataset.i18nAriaLabelFallback
+      ?? element.getAttribute("aria-label")
+      ?? "";
+    element.dataset.i18nAriaLabelFallback = fallback;
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel, fallback));
+  }
+}
+
+function applyLocale(locale, { persist = false, announce = false, rerender = true } = {}) {
+  state.locale = SUPPORTED_LOCALES.has(locale) ? locale : "en";
+  elements.languageSelect.value = state.locale;
+  if (persist) {
+    persistLocale(state.locale);
+  }
+  applyStaticTranslations();
+  renderConnection();
+  renderRunListToggle();
+  if (rerender && state.meta) {
+    renderWorkspaceOptions();
+    renderRunList();
+    renderScopeSummary();
+    if (state.detail) {
+      renderRunDetail({ clearMessage: false });
+    } else {
+      renderEmptyState();
+    }
+  }
+  if (announce) {
+    const language = elements.languageSelect.selectedOptions[0]?.textContent || state.locale;
+    showToast(t("toast.languageChanged", "Language changed to {language}.", { language }));
+  }
+}
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -80,7 +295,11 @@ async function api(path, options = {}) {
     payload = null;
   }
   if (!response.ok) {
-    const message = payload?.error?.message || `Dashboard request failed (${response.status})`;
+    const message = payload?.error?.message || t(
+      "error.requestFailed",
+      "Dashboard request failed ({status})",
+      { status: response.status },
+    );
     throw new Error(message);
   }
   return payload;
@@ -106,24 +325,31 @@ function createSvg(tag, attributes = {}) {
 }
 
 function formatNumber(value) {
-  return new Intl.NumberFormat().format(Number(value || 0));
+  return new Intl.NumberFormat(state.locale).format(Number(value || 0));
 }
 
 function formatDuration(seconds) {
   const value = Number(seconds || 0);
   if (value < 60) {
-    return `${value.toFixed(value < 10 ? 1 : 0)}s`;
+    const formatted = new Intl.NumberFormat(state.locale, {
+      minimumFractionDigits: value < 10 ? 1 : 0,
+      maximumFractionDigits: 1,
+    }).format(value);
+    return t("duration.seconds", "{seconds}s", { seconds: formatted });
   }
   const minutes = Math.floor(value / 60);
   const remaining = Math.round(value % 60);
-  return `${minutes}m ${remaining}s`;
+  return t("duration.minutesSeconds", "{minutes}m {seconds}s", {
+    minutes: formatNumber(minutes),
+    seconds: formatNumber(remaining),
+  });
 }
 
 function formatDate(value) {
   if (!value) {
     return "—";
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(state.locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -134,7 +360,7 @@ function formatDate(value) {
 
 function shortPath(path) {
   if (!path) {
-    return "Unknown workspace";
+    return t("common.unknownWorkspace", "Unknown workspace");
   }
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) || path;
@@ -146,13 +372,21 @@ function truncate(value, length) {
 }
 
 function statusPill(status) {
-  const pill = createElement("span", `status-pill ${status}`, status);
+  const pill = createElement("span", `status-pill ${status}`, translatedValue("status", status));
   return pill;
 }
 
-function setConnection(status, label) {
-  elements.connectionState.className = `connection-state ${status}`;
-  elements.connectionState.lastElementChild.textContent = label;
+function renderConnection() {
+  elements.connectionState.className = `connection-state ${state.connection.status}`;
+  elements.connectionState.lastElementChild.textContent = t(
+    state.connection.key,
+    state.connection.fallback,
+  );
+}
+
+function setConnection(status, key, fallback) {
+  state.connection = { status, key, fallback };
+  renderConnection();
 }
 
 function showToast(message) {
@@ -176,7 +410,13 @@ function clearActionMessage() {
 
 async function initialize() {
   try {
-    setConnection("", "Loading");
+    state.locale = resolveInitialLocale();
+    await loadTranslations();
+    if (!state.translationsAvailable) {
+      state.locale = "en";
+    }
+    applyLocale(state.locale, { rerender: false });
+    setConnection("", "connection.loading", "Loading");
     const [metaPayload, workspacePayload, capabilityPayload] = await Promise.all([
       api("/api/v1/meta"),
       api("/api/v1/workspaces"),
@@ -193,7 +433,7 @@ async function initialize() {
       elements.workspaceSelect.value = state.meta.initial_workspace;
     }
     await loadRuns({ reset: true });
-    setConnection("connected", "Live");
+    setConnection("connected", "connection.live", "Live");
   } catch (error) {
     handleError(error);
   }
@@ -201,7 +441,7 @@ async function initialize() {
 
 function renderWorkspaceOptions() {
   const currentValue = elements.workspaceSelect.value;
-  const allOption = createElement("option", "", "All projects");
+  const allOption = createElement("option", "", t("workspace.all", "All projects"));
   allOption.value = "";
   const options = [allOption];
   for (const workspace of state.workspaces) {
@@ -233,7 +473,7 @@ async function loadRuns({ reset = false, append = false, silent = false } = {}) 
     query.set("workspace", workspace);
   }
   if (!silent) {
-    setConnection("", "Refreshing");
+    setConnection("", "connection.refreshing", "Refreshing");
   }
   const payload = await api(`/api/v1/runs?${query.toString()}`);
   state.runs = append ? [...state.runs, ...payload.runs] : payload.runs;
@@ -247,17 +487,19 @@ async function loadRuns({ reset = false, append = false, silent = false } = {}) 
     await selectRun(state.runs[0].run_id);
   } else {
     state.selectedRunId = null;
+    state.selectedTaskId = null;
     state.detail = null;
     renderEmptyState();
   }
-  setConnection("connected", "Live");
+  renderRunListToggle();
+  setConnection("connected", "connection.live", "Live");
 }
 
 function renderRunList() {
   elements.runCount.textContent = formatNumber(state.runs.length);
   if (!state.runs.length) {
     elements.runList.replaceChildren(
-      createElement("div", "empty-list", "No AgentBraid runs in this scope."),
+      createElement("div", "empty-list", t("run.none", "No AgentBraid runs in this scope.")),
     );
   } else {
     const items = state.runs.map((run) => {
@@ -277,12 +519,27 @@ function renderRunList() {
       footer.append(createElement("span", "", shortPath(run.workspace)));
       footer.append(createElement("span", "", formatNumber(run.observed_total_tokens)));
       button.append(top, goal, footer);
-      button.addEventListener("click", () => selectRun(run.run_id));
+      button.addEventListener("click", () => selectRun(run.run_id, { focusDetail: true }));
       return button;
     });
     elements.runList.replaceChildren(...items);
   }
   elements.loadMoreButton.hidden = !state.hasMore;
+}
+
+function renderRunListToggle() {
+  const mobile = MOBILE_BREAKPOINT.matches;
+  const hasRuns = state.runs.length > 0;
+  const expanded = !mobile
+    || !hasRuns
+    || !state.selectedRunId
+    || state.mobileRunListExpanded;
+  elements.runListToggle.hidden = !mobile || !hasRuns;
+  elements.runListToggle.setAttribute("aria-expanded", String(expanded));
+  elements.runListToggle.textContent = expanded
+    ? t("sidebar.hideRuns", "Hide runs ({count})", { count: formatNumber(state.runs.length) })
+    : t("sidebar.showRuns", "Show runs ({count})", { count: formatNumber(state.runs.length) });
+  elements.runListRegion.hidden = !expanded;
 }
 
 function renderScopeSummary() {
@@ -292,18 +549,32 @@ function renderScopeSummary() {
     : state.workspaces;
   const active = relevant.reduce((sum, workspace) => sum + workspace.active_run_count, 0);
   const tokens = relevant.reduce((sum, workspace) => sum + workspace.observed_total_tokens, 0);
-  elements.scopeSummary.textContent = `${formatNumber(active)} active · ${formatNumber(tokens)} observed tokens`;
+  elements.scopeSummary.textContent = t(
+    "scope.summary",
+    "{active} active · {tokens} observed tokens",
+    { active: formatNumber(active), tokens: formatNumber(tokens) },
+  );
 }
 
-async function selectRun(runId) {
+async function selectRun(runId, { focusDetail = false } = {}) {
+  if (state.selectedRunId !== runId) {
+    state.selectedTaskId = null;
+  }
   state.selectedRunId = runId;
+  if (MOBILE_BREAKPOINT.matches) {
+    state.mobileRunListExpanded = false;
+  }
   renderRunList();
+  renderRunListToggle();
   await loadRunDetail(runId);
+  if (focusDetail && MOBILE_BREAKPOINT.matches) {
+    window.requestAnimationFrame(() => elements.runGoal.focus());
+  }
 }
 
 async function loadRunDetail(runId, { silent = false } = {}) {
   if (!silent) {
-    setConnection("", "Loading run");
+    setConnection("", "connection.loadingRun", "Loading run");
   }
   const detail = await api(`/api/v1/runs/${encodeURIComponent(runId)}`);
   if (state.selectedRunId !== runId) {
@@ -311,7 +582,7 @@ async function loadRunDetail(runId, { silent = false } = {}) {
   }
   state.detail = detail;
   renderRunDetail();
-  setConnection("connected", "Live");
+  setConnection("connected", "connection.live", "Live");
 }
 
 function renderEmptyState() {
@@ -319,7 +590,7 @@ function renderEmptyState() {
   elements.runDetail.hidden = true;
 }
 
-function renderRunDetail() {
+function renderRunDetail({ clearMessage = true } = {}) {
   if (!state.detail) {
     renderEmptyState();
     return;
@@ -327,16 +598,21 @@ function renderRunDetail() {
   const { run, usage, actions } = state.detail;
   elements.emptyState.hidden = true;
   elements.runDetail.hidden = false;
-  elements.runStatus.textContent = run.status;
+  elements.runStatus.textContent = translatedValue("status", run.status);
   elements.runStatus.className = `status-pill ${run.status}`;
   elements.runId.textContent = run.run_id;
   elements.runGoal.textContent = run.request.goal;
-  elements.runWorkspace.textContent = run.request.workspace || "Unknown workspace";
+  elements.runWorkspace.textContent = run.request.workspace
+    || t("common.unknownWorkspace", "Unknown workspace");
   elements.cancelButton.hidden = !actions.can_cancel;
   elements.cancelButton.disabled = !actions.can_cancel;
-  elements.applyButton.hidden = run.request.delivery_mode !== "integration_branch";
+  const showsApply = run.request.delivery_mode === "integration_branch";
+  elements.applyButton.hidden = !showsApply;
   elements.applyButton.disabled = !actions.apply.can_apply;
-  clearActionMessage();
+  renderApplyActionHint(showsApply, actions.apply);
+  if (clearMessage) {
+    clearActionMessage();
+  }
 
   renderMetrics(usage.totals);
   renderDag(run.tasks);
@@ -347,18 +623,60 @@ function renderRunDetail() {
   renderDelivery(run, actions.apply);
 }
 
+function renderApplyActionHint(showsApply, readiness) {
+  if (!showsApply || readiness.can_apply) {
+    elements.applyActionHint.hidden = true;
+    elements.applyActionHint.textContent = "";
+    elements.applyButton.removeAttribute("aria-describedby");
+    return;
+  }
+  const blockers = readiness.blockers || [];
+  if (blockers.length > 1) {
+    elements.applyActionHint.textContent = t(
+      "actions.applyBlockedMore",
+      "Cannot apply: {reason} (+{count} more)",
+      { reason: blockers[0], count: formatNumber(blockers.length - 1) },
+    );
+  } else if (blockers.length === 1) {
+    elements.applyActionHint.textContent = t(
+      "actions.applyBlocked",
+      "Cannot apply: {reason}",
+      { reason: blockers[0] },
+    );
+  } else {
+    elements.applyActionHint.textContent = t(
+      "actions.applyPending",
+      "Apply becomes available after final review and delivery checks pass.",
+    );
+  }
+  elements.applyActionHint.hidden = false;
+  elements.applyButton.setAttribute("aria-describedby", elements.applyActionHint.id);
+}
+
 function renderMetrics(totals) {
   elements.totalTokens.textContent = formatNumber(totals.observed_total_tokens);
   const ratio = totals.input_tokens
     ? Math.round((totals.cached_input_tokens / totals.input_tokens) * 100)
     : 0;
   elements.cacheRatio.textContent = `${ratio}%`;
-  elements.cachedTokens.textContent = `${formatNumber(totals.cached_input_tokens)} cached`;
+  elements.cachedTokens.textContent = t(
+    "metrics.cachedValue",
+    "{count} cached",
+    { count: formatNumber(totals.cached_input_tokens) },
+  );
   elements.retryTokens.textContent = formatNumber(totals.retry_tokens);
   elements.duration.textContent = formatDuration(totals.duration_seconds);
-  elements.invocations.textContent = `${formatNumber(totals.invocation_count)} invocations`;
+  elements.invocations.textContent = t(
+    "metrics.invocationsValue",
+    "{count} invocations",
+    { count: formatNumber(totals.invocation_count) },
+  );
   if (totals.legacy_invocation_count) {
-    elements.legacyNote.textContent = `${formatNumber(totals.legacy_invocation_count)} legacy invocation records do not include attempt/outcome attribution.`;
+    elements.legacyNote.textContent = t(
+      "metrics.legacyNote",
+      "{count} legacy invocation records do not include attempt/outcome attribution.",
+      { count: formatNumber(totals.legacy_invocation_count) },
+    );
     elements.legacyNote.hidden = false;
   } else {
     elements.legacyNote.hidden = true;
@@ -392,11 +710,18 @@ function taskDepths(tasks) {
 
 function renderDag(tasks) {
   elements.taskDag.replaceChildren();
+  const selectedTask = tasks.find((task) => task.spec.task_id === state.selectedTaskId);
+  if (!selectedTask) {
+    state.selectedTaskId = null;
+  }
   elements.taskDetail.textContent = tasks.length
-    ? "Select a task node to inspect its assignment and latest result."
-    : "This run has no persisted task plan yet.";
+    ? t("dag.selectTask", "Select a task node to inspect its assignment and latest result.")
+    : t("dag.noPlan", "This run has no persisted task plan yet.");
   if (!tasks.length) {
-    elements.taskDag.setAttribute("viewBox", "0 0 680 230");
+    const width = Math.max(elements.dagContainer.clientWidth, 280);
+    elements.taskDag.style.width = `${width}px`;
+    elements.taskDag.setAttribute("viewBox", `0 0 ${width} 230`);
+    elements.dagScrollHint.hidden = true;
     return;
   }
 
@@ -420,17 +745,21 @@ function renderDag(tasks) {
   const padding = 26;
   const maxDepth = Math.max(...columns.keys());
   const maxRows = Math.max(...[...columns.values()].map((column) => column.length));
-  const width = Math.max(680, padding * 2 + (maxDepth + 1) * nodeWidth + maxDepth * xGap);
+  const graphWidth = (maxDepth + 1) * nodeWidth + maxDepth * xGap;
+  const contentWidth = padding * 2 + graphWidth;
+  const width = Math.max(elements.dagContainer.clientWidth, contentWidth, 280);
   const height = Math.max(230, padding * 2 + maxRows * nodeHeight + (maxRows - 1) * yGap);
+  elements.taskDag.style.width = `${width}px`;
   elements.taskDag.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
   const positions = new Map();
+  const startX = Math.max(padding, (width - graphWidth) / 2);
   for (const [depth, column] of columns.entries()) {
     const columnHeight = column.length * nodeHeight + (column.length - 1) * yGap;
     const startY = Math.max(padding, (height - columnHeight) / 2);
     column.forEach((task, index) => {
       positions.set(task.spec.task_id, {
-        x: padding + depth * (nodeWidth + xGap),
+        x: startX + depth * (nodeWidth + xGap),
         y: startY + index * (nodeHeight + yGap),
       });
     });
@@ -462,12 +791,19 @@ function renderDag(tasks) {
   for (const task of tasks) {
     const position = positions.get(task.spec.task_id);
     const group = createSvg("g", {
-      class: "dag-node",
+      class: `dag-node${task.spec.task_id === state.selectedTaskId ? " selected" : ""}`,
       role: "button",
       tabindex: "0",
-      "aria-label": `${task.spec.title}, ${task.executor}, ${task.status}`,
+      "aria-label": t("dag.nodeAria", "{title}, {executor}, {status}", {
+        title: task.spec.title,
+        executor: translatedValue("executor", task.executor),
+        status: translatedValue("status", task.status),
+      }),
       transform: `translate(${position.x} ${position.y})`,
     });
+    const fullTitle = createSvg("title");
+    fullTitle.textContent = task.spec.title;
+    group.append(fullTitle);
     group.append(createSvg("rect", { width: nodeWidth, height: nodeHeight, rx: 10 }));
     group.append(
       createSvg("rect", {
@@ -482,11 +818,21 @@ function renderDag(tasks) {
     const identifier = createSvg("text", { x: 15, y: 44, class: "dag-node-meta" });
     identifier.textContent = task.spec.task_id;
     const metadata = createSvg("text", { x: 15, y: 61, class: "dag-node-meta" });
-    metadata.textContent = `${task.status} · ${task.executor} · attempt ${task.attempt}`;
+    const attempt = t(
+      "dag.attempt",
+      "attempt {attempt}",
+      { attempt: formatNumber(task.attempt) },
+    );
+    metadata.textContent = [
+      translatedValue("status", task.status),
+      translatedValue("executor", task.executor),
+      attempt,
+    ].join(" · ");
     group.append(title, identifier, metadata);
     const select = () => {
       elements.taskDag.querySelectorAll(".dag-node").forEach((node) => node.classList.remove("selected"));
       group.classList.add("selected");
+      state.selectedTaskId = task.spec.task_id;
       renderTaskDetail(task);
     };
     group.addEventListener("click", select);
@@ -498,30 +844,52 @@ function renderDag(tasks) {
     });
     elements.taskDag.append(group);
   }
+  elements.dagScrollHint.hidden = elements.dagContainer.scrollWidth
+    <= elements.dagContainer.clientWidth + 1;
+  if (selectedTask) {
+    renderTaskDetail(selectedTask);
+  }
 }
 
 function renderTaskDetail(task) {
-  const result = task.result?.summary ? ` Latest result: ${task.result.summary}` : "";
-  elements.taskDetail.textContent = `${task.spec.task_id} · ${task.assignment_rationale} Mutates workspace: ${task.spec.mutates_workspace ? "yes" : "no"}.${result}`;
+  const mutates = task.spec.mutates_workspace
+    ? t("common.yes", "yes")
+    : t("common.no", "no");
+  const parts = [
+    `${task.spec.task_id} · ${task.assignment_rationale}`,
+    `${t("task.mutatesWorkspace", "Mutates workspace:")} ${mutates}.`,
+  ];
+  if (task.result?.summary) {
+    parts.push(`${t("task.latestResult", "Latest result:")} ${task.result.summary}`);
+  }
+  elements.taskDetail.textContent = parts.join(" ");
 }
 
 function renderUsageChart(buckets, totals) {
   if (!buckets.length) {
     elements.usageChart.replaceChildren(
-      createElement("div", "empty-list", "No provider usage has been recorded for this run."),
+      createElement(
+        "div",
+        "empty-list",
+        t("usage.none", "No provider usage has been recorded for this run."),
+      ),
     );
     return;
   }
   const maximum = Math.max(...buckets.map((bucket) => bucket.observed_total_tokens), 1);
   const rows = buckets.map((bucket) => {
     const row = createElement("div", "usage-row");
-    row.append(createElement("span", "usage-label", bucket.phase));
+    const phase = translatedValue("phase", bucket.phase);
+    row.append(createElement("span", "usage-label", phase));
     const chart = createSvg("svg", {
       class: "usage-track",
       viewBox: "0 0 100 15",
       preserveAspectRatio: "none",
       role: "img",
-      "aria-label": `${bucket.phase}: ${formatNumber(bucket.observed_total_tokens)} observed tokens`,
+      "aria-label": t("usage.chartAria", "{phase}: {tokens} observed tokens", {
+        phase,
+        tokens: formatNumber(bucket.observed_total_tokens),
+      }),
     });
     const segments = [
       ["uncached", bucket.uncached_input_tokens],
@@ -541,7 +909,10 @@ function renderUsageChart(buckets, totals) {
           height: 15,
         });
         segment.append(createSvg("title"));
-        segment.firstElementChild.textContent = `${name}: ${formatNumber(value)}`;
+        segment.firstElementChild.textContent = [
+          translatedValue("usageSegment", name),
+          formatNumber(value),
+        ].join(": ");
         chart.append(segment);
       }
       x += width;
@@ -553,15 +924,34 @@ function renderUsageChart(buckets, totals) {
   elements.usageChart.replaceChildren(...rows);
   if (totals.observed_total_tokens === 0) {
     elements.usageChart.append(
-      createElement("div", "empty-list", "Usage records contain no reported tokens."),
+      createElement(
+        "div",
+        "empty-list",
+        t("usage.noReportedTokens", "Usage records contain no reported tokens."),
+      ),
     );
   }
 }
 
 function renderUsageTable(records) {
+  const columns = [
+    ["table.phaseTask", "Phase / task"],
+    ["table.model", "Model"],
+    ["table.attempt", "Attempt"],
+    ["table.outcome", "Outcome"],
+    ["table.input", "Input"],
+    ["table.cached", "Cached"],
+    ["table.output", "Output"],
+    ["table.reasoning", "Reasoning"],
+    ["table.duration", "Duration"],
+  ];
   if (!records.length) {
     const row = createElement("tr");
-    const cell = createElement("td", "subtle", "No provider invocation records.");
+    const cell = createElement(
+      "td",
+      "subtle empty-table-cell",
+      t("table.noRecords", "No provider invocation records."),
+    );
     cell.colSpan = 9;
     row.append(cell);
     elements.usageTableBody.replaceChildren(row);
@@ -569,21 +959,29 @@ function renderUsageTable(records) {
   }
   const rows = records.map((record) => {
     const row = createElement("tr");
-    const label = record.task_id ? `${record.phase} / ${record.task_id}` : record.phase;
+    const phase = translatedValue("phase", record.phase);
+    const label = record.task_id ? `${phase} / ${record.task_id}` : phase;
     const values = [
       [label, ""],
       [record.model, "mono"],
-      [record.phase === "task" ? (record.attempt ?? "legacy") : "—", "number"],
-      [record.outcome ?? "legacy", ""],
+      [
+        record.phase === "task"
+          ? (record.attempt ?? t("table.legacy", "legacy"))
+          : t("common.notAvailable", "—"),
+        "number",
+      ],
+      [record.outcome ? translatedValue("outcome", record.outcome) : t("table.legacy", "legacy"), ""],
       [formatNumber(record.input_tokens), "number"],
       [formatNumber(record.cached_input_tokens), "number"],
       [formatNumber(record.output_tokens), "number"],
       [formatNumber(record.reasoning_output_tokens), "number"],
       [formatDuration(record.duration_seconds), "number"],
     ];
-    for (const [value, className] of values) {
-      row.append(createElement("td", className, value));
-    }
+    values.forEach(([value, className], index) => {
+      const cell = createElement("td", className, value);
+      cell.dataset.label = t(columns[index][0], columns[index][1]);
+      row.append(cell);
+    });
     return row;
   });
   elements.usageTableBody.replaceChildren(...rows);
@@ -592,19 +990,33 @@ function renderUsageTable(records) {
 function renderCapabilities() {
   if (!state.capabilities.length) {
     elements.capabilityList.replaceChildren(
-      createElement("div", "empty-list", "No provider capability observations yet."),
+      createElement(
+        "div",
+        "empty-list",
+        t("capabilities.none", "No provider capability observations yet."),
+      ),
     );
     return;
   }
   const items = state.capabilities.map((capability) => {
     const item = createElement("div", "capability-item");
-    item.append(createElement("div", "capability-model", `${capability.executor} / ${capability.model}`));
+    item.append(
+      createElement(
+        "div",
+        "capability-model",
+        `${translatedValue("executor", capability.executor)} / ${capability.model}`,
+      ),
+    );
     item.append(statusPill(capability.status));
     item.append(
       createElement(
         "div",
         "capability-meta",
-        `${formatNumber(capability.successes)} successes · ${formatNumber(capability.failures)} failures · ${formatDuration(capability.average_latency_seconds)} avg`,
+        t("capabilities.meta", "{successes} successes · {failures} failures · {duration} avg", {
+          successes: formatNumber(capability.successes),
+          failures: formatNumber(capability.failures),
+          duration: formatDuration(capability.average_latency_seconds),
+        }),
       ),
     );
     return item;
@@ -613,42 +1025,64 @@ function renderCapabilities() {
 }
 
 const eventLabels = {
-  "run.created": "Run created",
-  "run.planned": "Plan persisted",
-  "run.status_changed": "Run status changed",
-  "run.lead_thread_updated": "Lead thread updated",
-  "run.reviewed": "Final review recorded",
-  "run.cancelled": "Run cancelled",
-  "run.applied": "Integration applied",
-  "task.status_changed": "Task status changed",
-  "task.claimed": "Task claimed",
-  "task.worktree_assigned": "Worktree assigned",
-  "task.result_submitted": "Task result submitted",
+  "run.created": ["event.run.created", "Run created"],
+  "run.planned": ["event.run.planned", "Plan persisted"],
+  "run.status_changed": ["event.run.status_changed", "Run status changed"],
+  "run.lead_thread_updated": ["event.run.lead_thread_updated", "Lead thread updated"],
+  "run.reviewed": ["event.run.reviewed", "Final review recorded"],
+  "run.cancelled": ["event.run.cancelled", "Run cancelled"],
+  "run.applied": ["event.run.applied", "Integration applied"],
+  "task.status_changed": ["event.task.status_changed", "Task status changed"],
+  "task.claimed": ["event.task.claimed", "Task claimed"],
+  "task.worktree_assigned": ["event.task.worktree_assigned", "Worktree assigned"],
+  "task.result_submitted": ["event.task.result_submitted", "Task result submitted"],
 };
+
+function translatedEventValue(value) {
+  for (const group of ["status", "outcome", "executor"]) {
+    if (valueLabels[group][value]) {
+      return translatedValue(group, value);
+    }
+  }
+  return String(value);
+}
 
 function eventSummary(event) {
   const payload = event.payload || {};
   if (payload.from || payload.to) {
-    return [payload.from, payload.to].filter(Boolean).join(" → ");
+    return [payload.from, payload.to].filter(Boolean).map(translatedEventValue).join(" → ");
   }
   if (payload.outcome || payload.status) {
-    return [payload.outcome, payload.status, payload.attempt ? `attempt ${payload.attempt}` : null]
+    return [
+      payload.outcome ? translatedValue("outcome", payload.outcome) : null,
+      payload.status ? translatedValue("status", payload.status) : null,
+      payload.attempt
+        ? t("event.attempt", "attempt {attempt}", { attempt: formatNumber(payload.attempt) })
+        : null,
+    ]
       .filter(Boolean)
       .join(" · ");
   }
   if (payload.executor || payload.claimed_by) {
-    return [payload.executor, payload.claimed_by].filter(Boolean).join(" · ");
+    return [
+      payload.executor ? translatedValue("executor", payload.executor) : null,
+      payload.claimed_by,
+    ].filter(Boolean).join(" · ");
   }
   if (event.task_id) {
     return event.task_id;
   }
-  return "Durable state event";
+  return t("event.durableState", "Durable state event");
 }
 
 function renderTimeline(events) {
   if (!events.length) {
     elements.eventTimeline.replaceChildren(
-      createElement("li", "empty-list", "No durable events have been recorded."),
+      createElement(
+        "li",
+        "empty-list",
+        t("event.none", "No durable events have been recorded."),
+      ),
     );
     return;
   }
@@ -657,7 +1091,10 @@ function renderTimeline(events) {
     item.append(createElement("time", "timeline-time", formatDate(event.created_at)));
     item.append(createElement("span", "timeline-rail"));
     const copy = createElement("div", "timeline-copy");
-    copy.append(createElement("strong", "", eventLabels[event.event_type] || event.event_type));
+    const label = eventLabels[event.event_type];
+    copy.append(
+      createElement("strong", "", label ? t(label[0], label[1]) : event.event_type),
+    );
     const taskPrefix = event.task_id ? `${event.task_id} · ` : "";
     copy.append(createElement("span", "", `${taskPrefix}${eventSummary(event)}`));
     item.append(copy);
@@ -668,12 +1105,30 @@ function renderTimeline(events) {
 
 function renderDelivery(run, readiness) {
   const entries = [
-    ["Delivery mode", run.request.delivery_mode],
-    ["Integration branch", run.integration_branch || "—"],
-    ["Expected branch", readiness.expected_branch || "—"],
-    ["Expected commit", readiness.expected_commit || "—"],
-    ["Current branch", readiness.current_branch || "—"],
-    ["Current commit", readiness.current_commit || "—"],
+    [
+      t("delivery.mode", "Delivery mode"),
+      translatedValue("deliveryMode", run.request.delivery_mode),
+    ],
+    [
+      t("delivery.integrationBranch", "Integration branch"),
+      run.integration_branch || t("common.notAvailable", "—"),
+    ],
+    [
+      t("delivery.expectedBranch", "Expected branch"),
+      readiness.expected_branch || t("common.notAvailable", "—"),
+    ],
+    [
+      t("delivery.expectedCommit", "Expected commit"),
+      readiness.expected_commit || t("common.notAvailable", "—"),
+    ],
+    [
+      t("delivery.currentBranch", "Current branch"),
+      readiness.current_branch || t("common.notAvailable", "—"),
+    ],
+    [
+      t("delivery.currentCommit", "Current commit"),
+      readiness.current_commit || t("common.notAvailable", "—"),
+    ],
   ];
   const nodes = [];
   for (const [term, description] of entries) {
@@ -682,7 +1137,9 @@ function renderDelivery(run, readiness) {
   elements.deliveryDetail.replaceChildren(...nodes);
   const blockers = readiness.blockers.map((blocker) => createElement("div", "blocker", blocker));
   elements.applyBlockers.replaceChildren(...blockers);
-  elements.finalSummary.textContent = run.final_summary || run.error || "Final review has not completed.";
+  elements.finalSummary.textContent = run.final_summary
+    || run.error
+    || t("delivery.finalPending", "Final review has not completed.");
 }
 
 async function refreshAll({ silent = false } = {}) {
@@ -707,15 +1164,28 @@ async function refreshAll({ silent = false } = {}) {
 }
 
 function handleError(error) {
-  const message = error instanceof Error ? error.message : "Dashboard request failed";
-  setConnection("error", "Disconnected");
+  const message = error instanceof Error
+    ? error.message
+    : t("error.requestFailedGeneric", "Dashboard request failed");
+  setConnection("error", "connection.disconnected", "Disconnected");
   showActionMessage(message, "error");
 }
 
 elements.workspaceSelect.addEventListener("change", () => {
   state.selectedRunId = null;
+  state.selectedTaskId = null;
+  state.mobileRunListExpanded = false;
   state.detail = null;
   loadRuns({ reset: true }).catch(handleError);
+});
+
+elements.languageSelect.addEventListener("change", () => {
+  applyLocale(elements.languageSelect.value, { persist: true, announce: true });
+});
+
+elements.runListToggle.addEventListener("click", () => {
+  state.mobileRunListExpanded = !state.mobileRunListExpanded;
+  renderRunListToggle();
 });
 
 elements.refreshButton.addEventListener("click", () => refreshAll());
@@ -740,7 +1210,7 @@ elements.cancelDialog.addEventListener("close", async () => {
     await api(`/api/v1/runs/${encodeURIComponent(state.selectedRunId)}/cancel`, {
       method: "POST",
     });
-    showToast("Run cancelled.");
+    showToast(t("toast.cancelled", "Run cancelled."));
     await refreshAll();
   } catch (error) {
     handleError(error);
@@ -772,7 +1242,7 @@ elements.applyForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ confirmation: elements.applyConfirmation.value }),
     });
     elements.applyDialog.close();
-    showToast("Reviewed integration branch applied.");
+    showToast(t("toast.applied", "Reviewed integration branch applied."));
     await refreshAll();
   } catch (error) {
     elements.confirmApplyButton.disabled = false;
@@ -785,6 +1255,29 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     refreshAll({ silent: true });
   }
+});
+
+MOBILE_BREAKPOINT.addEventListener("change", () => {
+  if (MOBILE_BREAKPOINT.matches) {
+    state.mobileRunListExpanded = false;
+  }
+  renderRunListToggle();
+  if (state.detail) {
+    renderDag(state.detail.run.tasks);
+  }
+});
+
+let resizeFrame = null;
+window.addEventListener("resize", () => {
+  if (resizeFrame !== null) {
+    window.cancelAnimationFrame(resizeFrame);
+  }
+  resizeFrame = window.requestAnimationFrame(() => {
+    resizeFrame = null;
+    if (state.detail) {
+      renderDag(state.detail.run.tasks);
+    }
+  });
 });
 
 window.setInterval(() => {

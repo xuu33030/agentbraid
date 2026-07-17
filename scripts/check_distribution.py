@@ -43,6 +43,7 @@ def check_wheel(path: Path) -> None:
         "agentbraid/dashboard_assets/index.html",
         "agentbraid/dashboard_assets/app.css",
         "agentbraid/dashboard_assets/app.js",
+        "agentbraid/dashboard_assets/locales.json",
         ".dist-info/licenses/LICENSE",
         ".dist-info/licenses/NOTICE",
         ".dist-info/licenses/THIRD_PARTY_NOTICES.md",

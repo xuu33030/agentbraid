@@ -7,6 +7,16 @@ uses semantic versioning after the alpha contract stabilizes.
 
 ## [Unreleased]
 
+### Added
+
+- Add bundled English, Traditional Chinese, and Simplified Chinese Dashboard locales with an
+  in-app language selector, browser-language detection, and a loopback-host locale preference.
+
+### Changed
+
+- Improve narrow-screen Dashboard navigation, task graph sizing, provider usage rows, event
+  timelines, and reviewed-apply readiness feedback without changing the run or delivery APIs.
+
 ## [0.2.0-alpha.1] - 2026-07-17
 
 ### Added
