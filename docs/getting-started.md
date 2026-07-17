@@ -25,7 +25,7 @@ will keep on disk:
 ```bash
 python -m venv ~/.venvs/agentbraid
 source ~/.venvs/agentbraid/bin/activate
-python -m pip install /path/to/agentbraid-0.1.0a1-py3-none-any.whl
+python -m pip install /path/to/agentbraid-0.1.0a2-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -34,7 +34,7 @@ Windows PowerShell:
 ```powershell
 py -3.13 -m venv $HOME\.venvs\agentbraid
 & $HOME\.venvs\agentbraid\Scripts\Activate.ps1
-python -m pip install C:\path\to\agentbraid-0.1.0a1-py3-none-any.whl
+python -m pip install C:\path\to\agentbraid-0.1.0a2-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -169,6 +169,7 @@ Workspace settings can be stored in `.agentbraid.toml`:
 ```toml
 [agentbraid]
 codex_timeout_seconds = 1800
+max_parallel_codex = 1
 max_output_bytes = 10485760
 max_task_attempts = 2
 ```
@@ -183,4 +184,3 @@ Useful environment overrides include:
 
 Database and worktree paths must remain outside the target repository and credential-bearing
 directories. See [`security-boundaries.md`](security-boundaries.md) before overriding them.
-

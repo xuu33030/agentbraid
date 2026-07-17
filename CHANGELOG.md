@@ -7,6 +7,17 @@ uses semantic versioning after the alpha contract stabilizes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Bind reviewed runs to their original branch and commit before local apply.
+- Reject dirty read-only integration worktrees and stale cross-model capability state.
+- Propagate cancellation to active Codex subprocesses and serialize final review per run.
+
+### Added
+
+- Persist per-phase Codex token usage and the original delivery target in SQLite schema v2.
+- Honor configured Codex parallelism and the global task retry ceiling.
+
 ## [0.1.0-alpha.1] - 2026-07-16
 
 ### Added

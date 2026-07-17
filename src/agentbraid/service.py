@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from agentbraid.config import AgentBraidConfig
 from agentbraid.errors import (
@@ -21,6 +22,7 @@ from agentbraid.models import (
     DeliveryMode,
     Executor,
     HostTaskResult,
+    ProviderUsageRecord,
     RunPlan,
     RunReview,
     RunSnapshot,
@@ -89,6 +91,12 @@ class AgentBraidService:
         self.codex = codex or CodexAdapter(config)
         self.router = router or TaskRouter()
         self.worktrees = worktrees or WorktreeManager(self.workspace, config.worktree_dir)
+        self._drain_locks: dict[str, asyncio.Lock] = {}
+        self._finalize_locks: dict[str, asyncio.Lock] = {}
+        self._integration_locks: dict[str, asyncio.Lock] = {}
+        self._active_invocations: dict[
+            tuple[str, str], tuple[asyncio.AbstractEventLoop, asyncio.Task[Any]]
+        ] = {}
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> AgentBraidService:
@@ -106,12 +114,21 @@ class AgentBraidService:
     async def start_run(self, request: StartRunRequest) -> RunSnapshot:
         _assert_not_child()
         self.worktrees.assert_clean_workspace()
+        target = self.worktrees.primary_target()
         normalized_request = redact_model(self._normalize_request(request))
-        run = self.store.create_run(normalized_request)
+        run = self.store.create_run(
+            normalized_request,
+            base_branch=target.branch,
+            base_commit=target.commit,
+        )
         self.store.begin_planning(run.run_id)
         model = self.config.codex_model or "codex-default"
         try:
             planning = await self.codex.plan(normalized_request, self.workspace)
+            self.store.record_provider_usage(
+                run.run_id,
+                _provider_usage_record("planning", model, planning),
+            )
             self.store.record_capability_result(
                 Executor.CODEX,
                 model,
@@ -119,17 +136,39 @@ class AgentBraidService:
                 latency_seconds=planning.duration_seconds,
                 status=CapabilityStatus.HEALTHY,
             )
+            plan = planning.output.model_copy(
+                update={
+                    "tasks": [
+                        task.model_copy(
+                            update={
+                                "max_attempts": min(
+                                    task.max_attempts,
+                                    self.config.max_task_attempts,
+                                )
+                            }
+                        )
+                        for task in planning.output.tasks
+                    ]
+                }
+            )
             assignments = self.router.route_plan(
-                planning.output,
+                plan,
                 self.store.list_capabilities(),
                 codex_model=model,
                 host_model=normalized_request.host_model,
             )
             integration_branch = f"agentbraid/integration/{run.run_id[:12]}"
-            self.worktrees.prepare_run(run.run_id, integration_branch)
+            current_target = self.worktrees.primary_target()
+            if current_target != target:
+                raise WorktreeError("primary workspace changed while the run was being planned")
+            self.worktrees.prepare_run(
+                run.run_id,
+                integration_branch,
+                base_commit=target.commit,
+            )
             snapshot = self.store.save_plan(
                 run.run_id,
-                planning.output,
+                plan,
                 assignments,
                 lead_thread_id=planning.thread_id,
                 integration_branch=integration_branch,
@@ -237,6 +276,14 @@ class AgentBraidService:
                 )
         elif not task.spec.mutates_workspace and commit_sha is not None:
             raise StateError("non-mutating host tasks must not submit a commit SHA")
+        elif not task.spec.mutates_workspace and task.worktree_path is not None:
+            try:
+                self.worktrees.assert_clean_worktree(Path(task.worktree_path))
+            except WorktreeError as exc:
+                raise StateError(
+                    "non-mutating host task changed its read-only worktree",
+                    detail=exc.detail,
+                ) from exc
         completed = self.store.submit_task_result(
             run_id,
             task_id,
@@ -264,7 +311,11 @@ class AgentBraidService:
         return self.store.get_run(run_id)
 
     def cancel_run(self, run_id: str) -> RunSnapshot:
-        return self.store.cancel_run(run_id)
+        cancelled = self.store.cancel_run(run_id)
+        for (candidate_run_id, _), (loop, task) in list(self._active_invocations.items()):
+            if candidate_run_id == run_id and not task.done():
+                loop.call_soon_threadsafe(task.cancel)
+        return cancelled
 
     def list_capabilities(self) -> list[CapabilitySnapshot]:
         return self.store.list_capabilities()
@@ -280,7 +331,13 @@ class AgentBraidService:
         if run.status != RunStatus.COMPLETED:
             raise StateError(f"run must complete final review before apply: {run.status.value}")
         integration_branch = _integration_branch(run)
-        commit_sha = self.worktrees.apply_integration(integration_branch)
+        if run.base_branch is None or run.base_commit is None:
+            raise StateError("run is missing its original delivery target")
+        commit_sha = self.worktrees.apply_integration_to_target(
+            integration_branch,
+            expected_branch=run.base_branch,
+            expected_commit=run.base_commit,
+        )
         self.store.record_event(
             run_id,
             "run.applied",
@@ -293,16 +350,37 @@ class AgentBraidService:
         )
 
     async def _drain_codex_tasks(self, run_id: str) -> None:
-        model = self.config.codex_model or "codex-default"
-        while self.store.get_run(run_id).status == RunStatus.RUNNING:
-            task = self.store.claim_task(run_id, Executor.CODEX, "agentbraid-codex-worker")
-            if task is None:
-                return
-            run = self.store.get_run(run_id)
-            integration_branch = _integration_branch(run)
-            worktree_path = Path(task.worktree_path) if task.worktree_path else None
-            commit_sha: str | None = None
-            try:
+        async with self._lock(self._drain_locks, run_id):
+            model = self.config.codex_model or "codex-default"
+            while self.store.get_run(run_id).status == RunStatus.RUNNING:
+                claimed: list[TaskState] = []
+                for _ in range(self.config.max_parallel_codex):
+                    task = self.store.claim_task(
+                        run_id,
+                        Executor.CODEX,
+                        "agentbraid-codex-worker",
+                    )
+                    if task is None:
+                        break
+                    claimed.append(task)
+                if not claimed:
+                    return
+                await asyncio.gather(
+                    *(self._execute_codex_task(run_id, task, model) for task in claimed)
+                )
+
+    async def _execute_codex_task(
+        self,
+        run_id: str,
+        task: TaskState,
+        model: str,
+    ) -> None:
+        run = self.store.get_run(run_id)
+        integration_branch = _integration_branch(run)
+        worktree_path = Path(task.worktree_path) if task.worktree_path else None
+        commit_sha: str | None = None
+        try:
+            async with self._lock(self._integration_locks, run_id):
                 if task.spec.mutates_workspace:
                     worktree = self.worktrees.prepare_task(
                         run_id,
@@ -311,16 +389,30 @@ class AgentBraidService:
                     )
                 else:
                     worktree = self.worktrees.prepare_run(run_id, integration_branch)
-                worktree_path = worktree.path
-                task = self.store.set_task_worktree(run_id, task.spec.task_id, worktree.path)
-                invocation = await self.codex.execute_task(
-                    task.spec,
-                    worktree.path,
-                    run_id=run_id,
-                )
-                result = invocation.output
-                if result.outcome == TaskOutcome.SUCCEEDED and task.spec.mutates_workspace:
-                    _require_success_evidence(task.spec, result)
+            worktree_path = worktree.path
+            task = self.store.set_task_worktree(run_id, task.spec.task_id, worktree.path)
+            invocation_task = asyncio.create_task(
+                self.codex.execute_task(task.spec, worktree.path, run_id=run_id)
+            )
+            key = (run_id, task.spec.task_id)
+            self._active_invocations[key] = (asyncio.get_running_loop(), invocation_task)
+            try:
+                invocation = await invocation_task
+            finally:
+                self._active_invocations.pop(key, None)
+            self.store.record_provider_usage(
+                run_id,
+                _provider_usage_record(
+                    "task",
+                    model,
+                    invocation,
+                    task_id=task.spec.task_id,
+                ),
+            )
+            result = invocation.output
+            if result.outcome == TaskOutcome.SUCCEEDED and task.spec.mutates_workspace:
+                _require_success_evidence(task.spec, result)
+                async with self._lock(self._integration_locks, run_id):
                     commit_sha = self.worktrees.commit_task(
                         worktree.path,
                         task.spec.task_id,
@@ -332,81 +424,28 @@ class AgentBraidService:
                         integration_branch,
                         commit_sha,
                     )
-                self.store.record_capability_result(
-                    Executor.CODEX,
-                    model,
-                    succeeded=result.outcome == TaskOutcome.SUCCEEDED,
-                    latency_seconds=invocation.duration_seconds,
-                    status=CapabilityStatus.HEALTHY,
-                )
-            except ProviderError as exc:
-                result = WorkerResult(
-                    outcome=(
-                        TaskOutcome.BLOCKED
-                        if isinstance(exc, ProviderUnavailableError)
-                        and (exc.quota_limited or not exc.retryable)
-                        else TaskOutcome.FAILED
-                    ),
-                    summary="Codex worker invocation failed.",
-                    error=exc.message,
-                )
-                self.store.record_capability_result(
-                    Executor.CODEX,
-                    model,
-                    succeeded=False,
-                    latency_seconds=0,
-                    status=(
-                        CapabilityStatus.CONSTRAINED
-                        if exc.quota_limited
-                        else CapabilityStatus.UNAVAILABLE
-                    ),
-                )
-            except (StateError, WorktreeError) as exc:
-                result = WorkerResult(
-                    outcome=(
-                        TaskOutcome.BLOCKED
-                        if isinstance(exc, WorktreeConflictError)
-                        else TaskOutcome.FAILED
-                    ),
-                    summary="Codex worker output could not be safely integrated.",
-                    error=exc.message,
-                )
-                self.store.record_capability_result(
-                    Executor.CODEX,
-                    model,
-                    succeeded=False,
-                    latency_seconds=0,
-                    status=CapabilityStatus.CONSTRAINED,
-                )
-            self.store.submit_task_result(
-                run_id,
-                task.spec.task_id,
-                result,
-                claimed_by="agentbraid-codex-worker",
-                worktree_path=str(worktree_path) if worktree_path is not None else None,
-                commit_sha=commit_sha,
+            self.store.record_capability_result(
+                Executor.CODEX,
+                model,
+                succeeded=result.outcome == TaskOutcome.SUCCEEDED,
+                latency_seconds=invocation.duration_seconds,
+                status=CapabilityStatus.HEALTHY,
             )
-
-    async def _finalize_if_ready(self, run_id: str) -> None:
-        run = self.store.get_run(run_id)
-        if run.status not in {RunStatus.INTEGRATING, RunStatus.REVIEWING}:
-            return
-        try:
-            integration = self.worktrees.prepare_run(run_id, _integration_branch(run))
-        except WorktreeError as exc:
-            self.store.set_run_status(
-                run_id,
-                RunStatus.BLOCKED,
-                error=f"final review workspace is unavailable: {exc.message}",
-            )
-            return
-        if run.status == RunStatus.INTEGRATING:
-            self.store.set_run_status(run_id, RunStatus.REVIEWING)
-        reviewing = self.store.get_run(run_id)
-        model = self.config.codex_model or "codex-default"
-        try:
-            invocation = await self.codex.review_run(reviewing, integration.path)
+        except asyncio.CancelledError:
+            if self.store.get_run(run_id).status == RunStatus.CANCELLED:
+                return
+            raise
         except ProviderError as exc:
+            result = WorkerResult(
+                outcome=(
+                    TaskOutcome.BLOCKED
+                    if isinstance(exc, ProviderUnavailableError)
+                    and (exc.quota_limited or not exc.retryable)
+                    else TaskOutcome.FAILED
+                ),
+                summary="Codex worker invocation failed.",
+                error=exc.message,
+            )
             self.store.record_capability_result(
                 Executor.CODEX,
                 model,
@@ -418,38 +457,118 @@ class AgentBraidService:
                     else CapabilityStatus.UNAVAILABLE
                 ),
             )
-            self.store.set_run_status(
-                run_id,
-                RunStatus.BLOCKED,
-                error=f"final review failed: {exc.message}",
+        except (StateError, WorktreeError) as exc:
+            result = WorkerResult(
+                outcome=(
+                    TaskOutcome.BLOCKED
+                    if isinstance(exc, WorktreeConflictError)
+                    else TaskOutcome.FAILED
+                ),
+                summary="Codex worker output could not be safely integrated.",
+                error=exc.message,
             )
+            self.store.record_capability_result(
+                Executor.CODEX,
+                model,
+                succeeded=False,
+                latency_seconds=0,
+                status=CapabilityStatus.CONSTRAINED,
+            )
+        if self.store.get_run(run_id).status == RunStatus.CANCELLED:
             return
-        review = invocation.output
-        self.store.record_capability_result(
-            Executor.CODEX,
-            model,
-            succeeded=review.approved,
-            latency_seconds=invocation.duration_seconds,
-            status=CapabilityStatus.HEALTHY,
-        )
-        self.store.record_event(
+        self.store.submit_task_result(
             run_id,
-            "run.reviewed",
-            review.model_dump(mode="json"),
+            task.spec.task_id,
+            result,
+            claimed_by="agentbraid-codex-worker",
+            worktree_path=str(worktree_path) if worktree_path is not None else None,
+            commit_sha=commit_sha,
         )
-        if review.approved:
-            self.store.set_run_status(
-                run_id,
-                RunStatus.COMPLETED,
-                final_summary=review.summary,
+
+    async def _finalize_if_ready(self, run_id: str) -> None:
+        async with self._lock(self._finalize_locks, run_id):
+            run = self.store.get_run(run_id)
+            if run.status not in {RunStatus.INTEGRATING, RunStatus.REVIEWING}:
+                return
+            try:
+                async with self._lock(self._integration_locks, run_id):
+                    integration = self.worktrees.prepare_run(run_id, _integration_branch(run))
+            except WorktreeError as exc:
+                self.store.set_run_status(
+                    run_id,
+                    RunStatus.BLOCKED,
+                    error=f"final review workspace is unavailable: {exc.message}",
+                )
+                return
+            if run.status == RunStatus.INTEGRATING:
+                self.store.set_run_status(run_id, RunStatus.REVIEWING)
+            reviewing = self.store.get_run(run_id)
+            model = self.config.codex_model or "codex-default"
+            key = (run_id, "final-review")
+            invocation_task = asyncio.create_task(
+                self.codex.review_run(reviewing, integration.path)
             )
-        else:
-            self.store.set_run_status(
+            self._active_invocations[key] = (asyncio.get_running_loop(), invocation_task)
+            try:
+                invocation = await invocation_task
+            except asyncio.CancelledError:
+                if self.store.get_run(run_id).status == RunStatus.CANCELLED:
+                    return
+                raise
+            except ProviderError as exc:
+                self.store.record_capability_result(
+                    Executor.CODEX,
+                    model,
+                    succeeded=False,
+                    latency_seconds=0,
+                    status=(
+                        CapabilityStatus.CONSTRAINED
+                        if exc.quota_limited
+                        else CapabilityStatus.UNAVAILABLE
+                    ),
+                )
+                self.store.set_run_status(
+                    run_id,
+                    RunStatus.BLOCKED,
+                    error=f"final review failed: {exc.message}",
+                )
+                return
+            finally:
+                self._active_invocations.pop(key, None)
+            self.store.record_provider_usage(
                 run_id,
-                RunStatus.BLOCKED,
-                final_summary=review.summary,
-                error="Codex lead did not approve the integrated candidate",
+                _provider_usage_record("review", model, invocation),
             )
+            review = invocation.output
+            self.store.record_capability_result(
+                Executor.CODEX,
+                model,
+                succeeded=review.approved,
+                latency_seconds=invocation.duration_seconds,
+                status=CapabilityStatus.HEALTHY,
+            )
+            self.store.record_event(
+                run_id,
+                "run.reviewed",
+                review.model_dump(mode="json"),
+            )
+            if review.approved:
+                self.store.set_run_status(
+                    run_id,
+                    RunStatus.COMPLETED,
+                    final_summary=review.summary,
+                )
+            else:
+                self.store.set_run_status(
+                    run_id,
+                    RunStatus.BLOCKED,
+                    final_summary=review.summary,
+                    error="Codex lead did not approve the integrated candidate",
+                )
+
+    @staticmethod
+    def _lock(locks: dict[str, asyncio.Lock], run_id: str) -> asyncio.Lock:
+        return locks.setdefault(run_id, asyncio.Lock())
 
     def _touch_host_capability(self, run_id: str, host_id: str) -> None:
         model = self.store.get_run(run_id).request.host_model
@@ -479,6 +598,26 @@ class AgentBraidService:
                     detail=f"configured={self.workspace}, requested={requested.resolve()}",
                 )
         return request.model_copy(update={"workspace": str(self.workspace)})
+
+
+def _provider_usage_record(
+    phase: str,
+    model: str,
+    invocation: StructuredProviderResult[Any],
+    *,
+    task_id: str | None = None,
+) -> ProviderUsageRecord:
+    return ProviderUsageRecord(
+        phase=phase,
+        executor=Executor.CODEX,
+        model=model,
+        task_id=task_id,
+        input_tokens=invocation.usage.input_tokens,
+        cached_input_tokens=invocation.usage.cached_input_tokens,
+        output_tokens=invocation.usage.output_tokens,
+        reasoning_output_tokens=invocation.usage.reasoning_output_tokens,
+        duration_seconds=invocation.duration_seconds,
+    )
 
 
 def _assert_not_child() -> None:

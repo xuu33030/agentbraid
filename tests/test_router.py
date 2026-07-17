@@ -194,3 +194,27 @@ def test_route_plan_uses_requested_models_and_preserves_task_ids() -> None:
 
     assert list(assignments) == ["route-task"]
     assert assignments["route-task"].executor == Executor.HOST
+
+
+def test_new_model_does_not_inherit_another_models_unavailable_state() -> None:
+    run_plan = RunPlan(
+        summary="Route one host task.",
+        tasks=[task(required_capabilities=["executor:host"])],
+        final_acceptance_criteria=["Task is routed."],
+    )
+
+    assignments = TaskRouter().route_plan(
+        run_plan,
+        [
+            CapabilitySnapshot(
+                executor=Executor.HOST,
+                model="old-host-model",
+                status=CapabilityStatus.UNAVAILABLE,
+            )
+        ],
+        codex_model="codex-model",
+        host_model="new-host-model",
+        now=NOW,
+    )
+
+    assert assignments["route-task"].executor == Executor.HOST

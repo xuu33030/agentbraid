@@ -19,6 +19,12 @@ class WorktreeInfo:
     base_commit: str
 
 
+@dataclass(frozen=True, slots=True)
+class PrimaryTarget:
+    branch: str
+    commit: str
+
+
 class WorktreeManager:
     """Create, validate, and integrate local Git worktrees without remote delivery."""
 
@@ -44,6 +50,16 @@ class WorktreeManager:
             )
         return root
 
+    def primary_target(self) -> PrimaryTarget:
+        repository = self.repository_root()
+        branch = self._git(["branch", "--show-current"], cwd=repository)
+        if not branch:
+            raise WorktreeError("primary workspace must be on a named branch")
+        return PrimaryTarget(
+            branch=branch,
+            commit=self._git(["rev-parse", "HEAD"], cwd=repository),
+        )
+
     def integration_path(self, run_id: str) -> Path:
         return self._safe_path(_safe_segment(run_id, "run ID"), "integration")
 
@@ -59,13 +75,20 @@ class WorktreeManager:
         safe_task_id = _safe_segment(task_id, "task ID")
         return f"agentbraid/tasks/{safe_run_id}/{safe_task_id}"
 
-    def prepare_run(self, run_id: str, integration_branch: str) -> WorktreeInfo:
+    def prepare_run(
+        self,
+        run_id: str,
+        integration_branch: str,
+        *,
+        base_commit: str | None = None,
+    ) -> WorktreeInfo:
         self.assert_clean_workspace()
         repository = self.repository_root()
         path = self.integration_path(run_id)
         self._validate_branch(integration_branch)
         if path.exists():
             self._assert_worktree_branch(path, integration_branch)
+            self.assert_clean_worktree(path)
             return WorktreeInfo(
                 path=path,
                 branch=integration_branch,
@@ -78,7 +101,14 @@ class WorktreeManager:
             self._git(["worktree", "add", str(path), integration_branch], cwd=repository)
         else:
             self._git(
-                ["worktree", "add", "-b", integration_branch, str(path), "HEAD"],
+                [
+                    "worktree",
+                    "add",
+                    "-b",
+                    integration_branch,
+                    str(path),
+                    base_commit or "HEAD",
+                ],
                 cwd=repository,
             )
         return WorktreeInfo(
@@ -187,10 +217,40 @@ class WorktreeManager:
         return self._git(["rev-parse", "HEAD"], cwd=integration.path)
 
     def apply_integration(self, integration_branch: str) -> str:
+        return self.apply_integration_to_target(integration_branch)
+
+    def apply_integration_to_target(
+        self,
+        integration_branch: str,
+        *,
+        expected_branch: str | None = None,
+        expected_commit: str | None = None,
+    ) -> str:
         self.assert_clean_workspace()
         self._validate_branch(integration_branch)
-        self._git(["merge", "--ff-only", integration_branch], cwd=self.repository_root())
-        return self._git(["rev-parse", "HEAD"], cwd=self.repository_root())
+        repository = self.repository_root()
+        target = self.primary_target()
+        if expected_branch is not None and target.branch != expected_branch:
+            raise WorktreeError(
+                "primary workspace branch changed since the run started",
+                detail=f"expected={expected_branch}, actual={target.branch}",
+            )
+        if expected_commit is not None and target.commit != expected_commit:
+            raise WorktreeError(
+                "primary workspace commit changed since the run started",
+                detail=f"expected={expected_commit}, actual={target.commit}",
+            )
+        self._git(["merge", "--ff-only", integration_branch], cwd=repository)
+        return self._git(["rev-parse", "HEAD"], cwd=repository)
+
+    def assert_clean_worktree(self, path: Path) -> None:
+        resolved = path.expanduser().resolve()
+        status = self._git(
+            ["status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=resolved,
+        )
+        if status:
+            raise WorktreeError("managed worktree must remain clean", detail=status)
 
     def _validate_task_commits(
         self,

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentbraid"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Braid multiple agents into one accountable workflow."
 readme = "README.md"
 requires-python = ">=3.11"
