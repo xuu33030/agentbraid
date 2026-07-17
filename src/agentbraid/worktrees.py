@@ -226,9 +226,24 @@ class WorktreeManager:
         expected_branch: str | None = None,
         expected_commit: str | None = None,
     ) -> str:
+        self.validate_apply_target(
+            integration_branch,
+            expected_branch=expected_branch,
+            expected_commit=expected_commit,
+        )
+        repository = self.repository_root()
+        self._git(["merge", "--ff-only", integration_branch], cwd=repository)
+        return self._git(["rev-parse", "HEAD"], cwd=repository)
+
+    def validate_apply_target(
+        self,
+        integration_branch: str,
+        *,
+        expected_branch: str | None = None,
+        expected_commit: str | None = None,
+    ) -> PrimaryTarget:
         self.assert_clean_workspace()
         self._validate_branch(integration_branch)
-        repository = self.repository_root()
         target = self.primary_target()
         if expected_branch is not None and target.branch != expected_branch:
             raise WorktreeError(
@@ -240,8 +255,9 @@ class WorktreeManager:
                 "primary workspace commit changed since the run started",
                 detail=f"expected={expected_commit}, actual={target.commit}",
             )
-        self._git(["merge", "--ff-only", integration_branch], cwd=repository)
-        return self._git(["rev-parse", "HEAD"], cwd=repository)
+        if not self._branch_exists(integration_branch):
+            raise WorktreeError("integration branch does not exist", detail=integration_branch)
+        return target
 
     def assert_clean_worktree(self, path: Path) -> None:
         resolved = path.expanduser().resolve()

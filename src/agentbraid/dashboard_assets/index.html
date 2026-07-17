@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="agentbraid-csrf" content="__CSRF_TOKEN__">
+  <title>AgentBraid Dashboard</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div id="agentbraid-app" class="app-shell">
+  <header class="topbar">
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">AB</div>
+      <div>
+        <p class="eyebrow">LOCAL ORCHESTRATION</p>
+        <h1>AgentBraid Dashboard</h1>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <label class="workspace-control">
+        <span>Workspace</span>
+        <select id="workspace-select" aria-label="Workspace filter">
+          <option value="">All projects</option>
+        </select>
+      </label>
+      <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+      <div id="connection-state" class="connection-state" role="status" aria-live="polite">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span>Connecting</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace-layout">
+    <aside class="run-sidebar" aria-label="AgentBraid runs">
+      <div class="sidebar-heading">
+        <div>
+          <p class="eyebrow">RUN HISTORY</p>
+          <h2>Runs</h2>
+        </div>
+        <span id="run-count" class="count-badge">0</span>
+      </div>
+      <div id="scope-summary" class="scope-summary" aria-live="polite"></div>
+      <div id="run-list" class="run-list"></div>
+      <button id="load-more-button" class="button secondary full-width" type="button" hidden>
+        Load more
+      </button>
+    </aside>
+
+    <section class="detail-pane" aria-label="Selected run details">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-glyph" aria-hidden="true">◇</div>
+        <h2>Select a run</h2>
+        <p>Inspect task dependencies, execution events, token allocation, and delivery safety.</p>
+      </div>
+
+      <div id="run-detail" hidden>
+        <header class="run-header">
+          <div class="run-heading-copy">
+            <div class="status-line">
+              <span id="run-status" class="status-pill"></span>
+              <span id="run-id" class="mono subtle"></span>
+            </div>
+            <h2 id="run-goal"></h2>
+            <p id="run-workspace" class="mono subtle path-text"></p>
+          </div>
+          <div class="run-actions">
+            <button id="cancel-button" class="button danger" type="button">Cancel run</button>
+            <button id="apply-button" class="button primary" type="button">Apply reviewed run</button>
+          </div>
+        </header>
+
+        <div id="action-message" class="message" role="status" aria-live="polite" hidden></div>
+
+        <section class="metric-grid" aria-label="Run metrics">
+          <article class="metric-card">
+            <span>Observed tokens</span>
+            <strong id="metric-total-tokens">0</strong>
+            <small>input + output</small>
+          </article>
+          <article class="metric-card">
+            <span>Input cache ratio</span>
+            <strong id="metric-cache-ratio">0%</strong>
+            <small id="metric-cached-tokens">0 cached</small>
+          </article>
+          <article class="metric-card">
+            <span>Retry overhead</span>
+            <strong id="metric-retry-tokens">0</strong>
+            <small>earlier task attempts</small>
+          </article>
+          <article class="metric-card">
+            <span>Provider duration</span>
+            <strong id="metric-duration">0s</strong>
+            <small id="metric-invocations">0 invocations</small>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">EXECUTION PLAN</p>
+              <h3>Task dependency graph</h3>
+            </div>
+            <div class="legend" aria-label="Task executor legend">
+              <span><i class="legend-dot codex"></i>Codex</span>
+              <span><i class="legend-dot host"></i>Host</span>
+            </div>
+          </div>
+          <div id="dag-container" class="dag-container">
+            <svg id="task-dag" role="img" aria-label="Task dependency graph"></svg>
+          </div>
+          <div id="task-detail" class="task-detail" aria-live="polite"></div>
+        </section>
+
+        <section class="two-column-layout">
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">TOKEN ALLOCATION</p>
+                <h3>Usage by phase</h3>
+              </div>
+            </div>
+            <div id="usage-chart" class="usage-chart"></div>
+            <p id="legacy-note" class="subtle note" hidden></p>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">MODEL HEALTH</p>
+                <h3>Observed capabilities</h3>
+              </div>
+            </div>
+            <div id="capability-list" class="capability-list"></div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">INVOCATION DETAIL</p>
+              <h3>Provider usage</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Phase / task</th>
+                  <th>Model</th>
+                  <th>Attempt</th>
+                  <th>Outcome</th>
+                  <th>Input</th>
+                  <th>Cached</th>
+                  <th>Output</th>
+                  <th>Reasoning</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody id="usage-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="two-column-layout timeline-layout">
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">DURABLE TRACE</p>
+                <h3>Event timeline</h3>
+              </div>
+            </div>
+            <ol id="event-timeline" class="timeline"></ol>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">DELIVERY</p>
+                <h3>Review and Git target</h3>
+              </div>
+            </div>
+            <dl id="delivery-detail" class="definition-list"></dl>
+            <div id="apply-blockers" class="blocker-list"></div>
+            <div id="final-summary" class="summary-copy"></div>
+          </article>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="cancel-dialog">
+    <form method="dialog" class="dialog-content">
+      <p class="eyebrow">DESTRUCTIVE ACTION</p>
+      <h2>Cancel this run?</h2>
+      <p>Active provider work will be stopped and unfinished tasks will be marked cancelled.</p>
+      <div class="dialog-actions">
+        <button class="button secondary" value="close">Keep running</button>
+        <button id="confirm-cancel-button" class="button danger" value="confirm">Cancel run</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="apply-dialog">
+    <form id="apply-form" class="dialog-content">
+      <p class="eyebrow">REVIEWED DELIVERY</p>
+      <h2>Apply the integration branch?</h2>
+      <p>The primary workspace will be fast-forwarded only if its branch, commit, and cleanliness still match.</p>
+      <label class="confirmation-field">
+        <span>Type <code>apply-reviewed-run</code> to confirm</span>
+        <input id="apply-confirmation" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="dialog-actions">
+        <button id="close-apply-dialog" class="button secondary" type="button">Close</button>
+        <button id="confirm-apply-button" class="button primary" type="submit" disabled>
+          Apply reviewed run
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</div>
+<script src="/assets/app.js" defer></script>
+</body>
+</html>

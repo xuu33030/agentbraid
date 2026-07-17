@@ -21,22 +21,26 @@ from agentbraid.models import (
     DeliveryMode,
     Executor,
     HostTaskResult,
+    ProviderInvocationOutcome,
     ProviderUsageRecord,
     RoutingDecision,
+    RunEvent,
     RunPlan,
     RunSnapshot,
     RunStatus,
+    RunSummary,
     StartRunRequest,
     TaskOutcome,
     TaskSpec,
     TaskState,
     TaskStatus,
     WorkerResult,
+    WorkspaceSummary,
     utc_now,
 )
 from agentbraid.redaction import redact_model, redact_text, redact_value
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset({RunStatus.PLANNING, RunStatus.CANCELLED, RunStatus.FAILED}),
@@ -101,6 +105,7 @@ class StateStore:
                     CREATE TABLE runs (
                         run_id TEXT PRIMARY KEY,
                         request_json TEXT NOT NULL,
+                        workspace TEXT NOT NULL,
                         status TEXT NOT NULL,
                         plan_json TEXT,
                         lead_thread_id TEXT,
@@ -175,6 +180,8 @@ class StateStore:
                         phase TEXT NOT NULL,
                         executor TEXT NOT NULL,
                         model TEXT NOT NULL,
+                        attempt INTEGER,
+                        outcome TEXT,
                         input_tokens INTEGER NOT NULL,
                         cached_input_tokens INTEGER NOT NULL,
                         output_tokens INTEGER NOT NULL,
@@ -192,10 +199,13 @@ class StateStore:
                         ON events(run_id, event_id);
                     CREATE INDEX provider_usage_run_idx
                         ON provider_usage(run_id, usage_id);
+                    CREATE INDEX runs_workspace_updated_idx
+                        ON runs(workspace, updated_at DESC, run_id DESC);
                     """
                 )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            elif version == 1:
+                return
+            if version == 1:
                 connection.executescript(
                     """
                     ALTER TABLE runs ADD COLUMN base_branch TEXT;
@@ -219,6 +229,25 @@ class StateStore:
                         ON provider_usage(run_id, usage_id);
                     """
                 )
+                connection.execute("PRAGMA user_version = 2")
+                version = 2
+            if version == 2:
+                connection.executescript(
+                    """
+                    ALTER TABLE runs ADD COLUMN workspace TEXT NOT NULL DEFAULT '';
+                    ALTER TABLE provider_usage ADD COLUMN attempt INTEGER;
+                    ALTER TABLE provider_usage ADD COLUMN outcome TEXT;
+                    CREATE INDEX runs_workspace_updated_idx
+                        ON runs(workspace, updated_at DESC, run_id DESC);
+                    """
+                )
+                rows = connection.execute("SELECT run_id, request_json FROM runs").fetchall()
+                for row in rows:
+                    request = StartRunRequest.model_validate_json(row["request_json"])
+                    connection.execute(
+                        "UPDATE runs SET workspace = ? WHERE run_id = ?",
+                        (request.workspace or "", row["run_id"]),
+                    )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -264,13 +293,14 @@ class StateStore:
                 connection.execute(
                     """
                     INSERT INTO runs (
-                        run_id, request_json, status, base_branch, base_commit,
+                        run_id, request_json, workspace, status, base_branch, base_commit,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         identifier,
                         request.model_dump_json(),
+                        request.workspace or "",
                         RunStatus.CREATED.value,
                         base_branch,
                         base_commit,
@@ -301,6 +331,110 @@ class StateStore:
                 (run_id,),
             ).fetchall()
         return self._run_snapshot(run_row, task_rows, usage_rows)
+
+    def get_run_status(self, run_id: str) -> RunStatus:
+        with self._connect() as connection:
+            return RunStatus(self._get_run_row(connection, run_id)["status"])
+
+    def list_runs(
+        self,
+        *,
+        workspace: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[RunSummary]:
+        if not 1 <= limit <= 100:
+            raise StateError("run list limit must be between 1 and 100")
+        if offset < 0:
+            raise StateError("run list offset must not be negative")
+        where_clause = "WHERE r.workspace = ?" if workspace is not None else ""
+        parameters: list[object] = [workspace] if workspace is not None else []
+        parameters.extend([limit, offset])
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                WITH task_totals AS (
+                    SELECT
+                        run_id,
+                        COUNT(*) AS task_count,
+                        SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END)
+                            AS succeeded_task_count,
+                        SUM(CASE WHEN status IN ('failed', 'blocked', 'cancelled')
+                            THEN 1 ELSE 0 END) AS failed_task_count
+                    FROM tasks
+                    GROUP BY run_id
+                ),
+                usage_totals AS (
+                    SELECT run_id, SUM(input_tokens + output_tokens) AS observed_total_tokens
+                    FROM provider_usage
+                    GROUP BY run_id
+                ),
+                max_attempts AS (
+                    SELECT run_id, task_id, MAX(attempt) AS final_attempt
+                    FROM provider_usage
+                    WHERE phase = 'task' AND task_id IS NOT NULL AND attempt IS NOT NULL
+                    GROUP BY run_id, task_id
+                ),
+                retry_totals AS (
+                    SELECT p.run_id, SUM(p.input_tokens + p.output_tokens) AS retry_tokens
+                    FROM provider_usage AS p
+                    JOIN max_attempts AS m
+                        ON m.run_id = p.run_id AND m.task_id = p.task_id
+                    WHERE p.attempt < m.final_attempt
+                    GROUP BY p.run_id
+                )
+                SELECT
+                    r.*,
+                    COALESCE(t.task_count, 0) AS task_count,
+                    COALESCE(t.succeeded_task_count, 0) AS succeeded_task_count,
+                    COALESCE(t.failed_task_count, 0) AS failed_task_count,
+                    COALESCE(u.observed_total_tokens, 0) AS observed_total_tokens,
+                    COALESCE(rt.retry_tokens, 0) AS retry_tokens
+                FROM runs AS r
+                LEFT JOIN task_totals AS t ON t.run_id = r.run_id
+                LEFT JOIN usage_totals AS u ON u.run_id = r.run_id
+                LEFT JOIN retry_totals AS rt ON rt.run_id = r.run_id
+                {where_clause}
+                ORDER BY r.updated_at DESC, r.run_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                parameters,
+            ).fetchall()
+        return [self._run_summary(row) for row in rows]
+
+    def list_workspaces(self) -> list[WorkspaceSummary]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                WITH usage_totals AS (
+                    SELECT run_id, SUM(input_tokens + output_tokens) AS observed_total_tokens
+                    FROM provider_usage
+                    GROUP BY run_id
+                )
+                SELECT
+                    r.workspace,
+                    COUNT(*) AS run_count,
+                    SUM(CASE WHEN r.status NOT IN ('completed', 'cancelled', 'failed')
+                        THEN 1 ELSE 0 END) AS active_run_count,
+                    COALESCE(SUM(u.observed_total_tokens), 0) AS observed_total_tokens,
+                    MAX(r.updated_at) AS updated_at
+                FROM runs AS r
+                LEFT JOIN usage_totals AS u ON u.run_id = r.run_id
+                WHERE r.workspace != ''
+                GROUP BY r.workspace
+                ORDER BY updated_at DESC, r.workspace
+                """
+            ).fetchall()
+        return [
+            WorkspaceSummary(
+                workspace=row["workspace"],
+                run_count=int(row["run_count"]),
+                active_run_count=int(row["active_run_count"]),
+                observed_total_tokens=int(row["observed_total_tokens"]),
+                updated_at=_load_datetime(row["updated_at"]),
+            )
+            for row in rows
+        ]
 
     def begin_planning(self, run_id: str) -> RunSnapshot:
         return self.set_run_status(run_id, RunStatus.PLANNING)
@@ -803,6 +937,9 @@ class StateStore:
             for row in rows
         ]
 
+    def list_run_events(self, run_id: str) -> list[RunEvent]:
+        return [RunEvent.model_validate(event) for event in self.list_events(run_id)]
+
     def record_event(
         self,
         run_id: str,
@@ -827,10 +964,10 @@ class StateStore:
             connection.execute(
                 """
                 INSERT INTO provider_usage (
-                    run_id, task_id, phase, executor, model, input_tokens,
+                    run_id, task_id, phase, executor, model, attempt, outcome, input_tokens,
                     cached_input_tokens, output_tokens, reasoning_output_tokens,
                     duration_seconds, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -838,6 +975,8 @@ class StateStore:
                     usage.phase,
                     usage.executor.value,
                     usage.model,
+                    usage.attempt,
+                    usage.outcome.value if usage.outcome is not None else None,
                     usage.input_tokens,
                     usage.cached_input_tokens,
                     usage.output_tokens,
@@ -1015,6 +1154,14 @@ class StateStore:
                     executor=Executor(usage_row["executor"]),
                     model=usage_row["model"],
                     task_id=usage_row["task_id"],
+                    attempt=(
+                        int(usage_row["attempt"]) if usage_row["attempt"] is not None else None
+                    ),
+                    outcome=(
+                        ProviderInvocationOutcome(usage_row["outcome"])
+                        if usage_row["outcome"] is not None
+                        else None
+                    ),
                     input_tokens=int(usage_row["input_tokens"]),
                     cached_input_tokens=int(usage_row["cached_input_tokens"]),
                     output_tokens=int(usage_row["output_tokens"]),
@@ -1024,6 +1171,25 @@ class StateStore:
                 )
                 for usage_row in usage_rows or []
             ],
+            created_at=_load_datetime(row["created_at"]),
+            updated_at=_load_datetime(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _run_summary(row: sqlite3.Row) -> RunSummary:
+        request = StartRunRequest.model_validate_json(row["request_json"])
+        return RunSummary(
+            run_id=row["run_id"],
+            workspace=row["workspace"] or request.workspace or "",
+            goal=request.goal,
+            status=RunStatus(row["status"]),
+            delivery_mode=request.delivery_mode,
+            base_branch=row["base_branch"],
+            task_count=int(row["task_count"]),
+            succeeded_task_count=int(row["succeeded_task_count"]),
+            failed_task_count=int(row["failed_task_count"]),
+            observed_total_tokens=int(row["observed_total_tokens"]),
+            retry_tokens=int(row["retry_tokens"]),
             created_at=_load_datetime(row["created_at"]),
             updated_at=_load_datetime(row["updated_at"]),
         )

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Coroutine
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from agentbraid.config import AgentBraidConfig
 from agentbraid.errors import (
@@ -16,12 +18,14 @@ from agentbraid.errors import (
     WorktreeError,
 )
 from agentbraid.models import (
+    ApplyReadiness,
     ApplyRunResult,
     CapabilitySnapshot,
     CapabilityStatus,
     DeliveryMode,
     Executor,
     HostTaskResult,
+    ProviderInvocationOutcome,
     ProviderUsageRecord,
     RunPlan,
     RunReview,
@@ -42,6 +46,13 @@ from agentbraid.router import TaskRouter
 from agentbraid.security import assert_safe_runtime_paths
 from agentbraid.store import StateStore
 from agentbraid.worktrees import WorktreeManager
+
+_InvocationOutput = TypeVar("_InvocationOutput")
+_CANCELLATION_POLL_SECONDS = 0.25
+
+
+class _RunCancelled(Exception):
+    pass
 
 
 class CodexProvider(Protocol):
@@ -124,10 +135,21 @@ class AgentBraidService:
         self.store.begin_planning(run.run_id)
         model = self.config.codex_model or "codex-default"
         try:
-            planning = await self.codex.plan(normalized_request, self.workspace)
+            planning = await self._await_invocation(
+                run.run_id,
+                "planning",
+                self.codex.plan(normalized_request, self.workspace),
+            )
+            if self.store.get_run_status(run.run_id) == RunStatus.CANCELLED:
+                raise _RunCancelled
             self.store.record_provider_usage(
                 run.run_id,
-                _provider_usage_record("planning", model, planning),
+                _provider_usage_record(
+                    "planning",
+                    model,
+                    planning,
+                    outcome=ProviderInvocationOutcome.SUCCEEDED,
+                ),
             )
             self.store.record_capability_result(
                 Executor.CODEX,
@@ -173,6 +195,8 @@ class AgentBraidService:
                 lead_thread_id=planning.thread_id,
                 integration_branch=integration_branch,
             )
+        except _RunCancelled:
+            return self.store.get_run(run.run_id)
         except ProviderError as exc:
             status = (
                 CapabilityStatus.CONSTRAINED if exc.quota_limited else CapabilityStatus.UNAVAILABLE
@@ -320,6 +344,44 @@ class AgentBraidService:
     def list_capabilities(self) -> list[CapabilitySnapshot]:
         return self.store.list_capabilities()
 
+    def get_apply_readiness(self, run_id: str) -> ApplyReadiness:
+        run = self.store.get_run(run_id)
+        blockers: list[str] = []
+        if run.request.delivery_mode != DeliveryMode.INTEGRATION_BRANCH:
+            blockers.append("report-only runs cannot be applied")
+        if run.status != RunStatus.COMPLETED:
+            blockers.append(f"run status is {run.status.value}, not completed")
+        if run.integration_branch is None:
+            blockers.append("run has no integration branch")
+        if run.base_branch is None or run.base_commit is None:
+            blockers.append("run is missing its original delivery target")
+
+        current_branch: str | None = None
+        current_commit: str | None = None
+        try:
+            target = self.worktrees.primary_target()
+            current_branch = target.branch
+            current_commit = target.commit
+            if not blockers:
+                assert run.integration_branch is not None
+                assert run.base_branch is not None
+                assert run.base_commit is not None
+                self.worktrees.validate_apply_target(
+                    run.integration_branch,
+                    expected_branch=run.base_branch,
+                    expected_commit=run.base_commit,
+                )
+        except WorktreeError as exc:
+            blockers.append(exc.message)
+        return ApplyReadiness(
+            can_apply=not blockers,
+            blockers=blockers,
+            expected_branch=run.base_branch,
+            expected_commit=run.base_commit,
+            current_branch=current_branch,
+            current_commit=current_commit,
+        )
+
     def apply_run(self, run_id: str, confirmation: str) -> ApplyRunResult:
         if confirmation != "apply-reviewed-run":
             raise SecurityBoundaryError(
@@ -348,6 +410,50 @@ class AgentBraidService:
             integration_branch=integration_branch,
             commit_sha=commit_sha,
         )
+
+    async def _await_invocation(
+        self,
+        run_id: str,
+        invocation_name: str,
+        invocation: Coroutine[Any, Any, _InvocationOutput],
+    ) -> _InvocationOutput:
+        invocation_task = asyncio.create_task(invocation)
+        cancellation_task = asyncio.create_task(self._wait_for_persisted_cancellation(run_id))
+        key = (run_id, invocation_name)
+        self._active_invocations[key] = (asyncio.get_running_loop(), invocation_task)
+        try:
+            done, _ = await asyncio.wait(
+                {invocation_task, cancellation_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancellation_task in done:
+                invocation_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await invocation_task
+                raise _RunCancelled
+            try:
+                output = await invocation_task
+                if self.store.get_run_status(run_id) == RunStatus.CANCELLED:
+                    raise _RunCancelled
+                return output
+            except asyncio.CancelledError:
+                if self.store.get_run_status(run_id) == RunStatus.CANCELLED:
+                    raise _RunCancelled from None
+                raise
+        except asyncio.CancelledError:
+            invocation_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await invocation_task
+            raise
+        finally:
+            cancellation_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cancellation_task
+            self._active_invocations.pop(key, None)
+
+    async def _wait_for_persisted_cancellation(self, run_id: str) -> None:
+        while self.store.get_run_status(run_id) != RunStatus.CANCELLED:
+            await asyncio.sleep(_CANCELLATION_POLL_SECONDS)
 
     async def _drain_codex_tasks(self, run_id: str) -> None:
         async with self._lock(self._drain_locks, run_id):
@@ -391,15 +497,14 @@ class AgentBraidService:
                     worktree = self.worktrees.prepare_run(run_id, integration_branch)
             worktree_path = worktree.path
             task = self.store.set_task_worktree(run_id, task.spec.task_id, worktree.path)
-            invocation_task = asyncio.create_task(
-                self.codex.execute_task(task.spec, worktree.path, run_id=run_id)
+            invocation = await self._await_invocation(
+                run_id,
+                task.spec.task_id,
+                self.codex.execute_task(task.spec, worktree.path, run_id=run_id),
             )
-            key = (run_id, task.spec.task_id)
-            self._active_invocations[key] = (asyncio.get_running_loop(), invocation_task)
-            try:
-                invocation = await invocation_task
-            finally:
-                self._active_invocations.pop(key, None)
+            if self.store.get_run_status(run_id) == RunStatus.CANCELLED:
+                raise _RunCancelled
+            result = invocation.output
             self.store.record_provider_usage(
                 run_id,
                 _provider_usage_record(
@@ -407,9 +512,10 @@ class AgentBraidService:
                     model,
                     invocation,
                     task_id=task.spec.task_id,
+                    attempt=task.attempt,
+                    outcome=ProviderInvocationOutcome(result.outcome.value),
                 ),
             )
-            result = invocation.output
             if result.outcome == TaskOutcome.SUCCEEDED and task.spec.mutates_workspace:
                 _require_success_evidence(task.spec, result)
                 async with self._lock(self._integration_locks, run_id):
@@ -431,10 +537,8 @@ class AgentBraidService:
                 latency_seconds=invocation.duration_seconds,
                 status=CapabilityStatus.HEALTHY,
             )
-        except asyncio.CancelledError:
-            if self.store.get_run(run_id).status == RunStatus.CANCELLED:
-                return
-            raise
+        except _RunCancelled:
+            return
         except ProviderError as exc:
             result = WorkerResult(
                 outcome=(
@@ -504,17 +608,16 @@ class AgentBraidService:
                 self.store.set_run_status(run_id, RunStatus.REVIEWING)
             reviewing = self.store.get_run(run_id)
             model = self.config.codex_model or "codex-default"
-            key = (run_id, "final-review")
-            invocation_task = asyncio.create_task(
-                self.codex.review_run(reviewing, integration.path)
-            )
-            self._active_invocations[key] = (asyncio.get_running_loop(), invocation_task)
             try:
-                invocation = await invocation_task
-            except asyncio.CancelledError:
-                if self.store.get_run(run_id).status == RunStatus.CANCELLED:
-                    return
-                raise
+                invocation = await self._await_invocation(
+                    run_id,
+                    "final-review",
+                    self.codex.review_run(reviewing, integration.path),
+                )
+                if self.store.get_run_status(run_id) == RunStatus.CANCELLED:
+                    raise _RunCancelled
+            except _RunCancelled:
+                return
             except ProviderError as exc:
                 self.store.record_capability_result(
                     Executor.CODEX,
@@ -533,13 +636,20 @@ class AgentBraidService:
                     error=f"final review failed: {exc.message}",
                 )
                 return
-            finally:
-                self._active_invocations.pop(key, None)
+            review = invocation.output
             self.store.record_provider_usage(
                 run_id,
-                _provider_usage_record("review", model, invocation),
+                _provider_usage_record(
+                    "review",
+                    model,
+                    invocation,
+                    outcome=(
+                        ProviderInvocationOutcome.APPROVED
+                        if review.approved
+                        else ProviderInvocationOutcome.REJECTED
+                    ),
+                ),
             )
-            review = invocation.output
             self.store.record_capability_result(
                 Executor.CODEX,
                 model,
@@ -606,12 +716,16 @@ def _provider_usage_record(
     invocation: StructuredProviderResult[Any],
     *,
     task_id: str | None = None,
+    attempt: int | None = None,
+    outcome: ProviderInvocationOutcome | None = None,
 ) -> ProviderUsageRecord:
     return ProviderUsageRecord(
         phase=phase,
         executor=Executor.CODEX,
         model=model,
         task_id=task_id,
+        attempt=attempt,
+        outcome=outcome,
         input_tokens=invocation.usage.input_tokens,
         cached_input_tokens=invocation.usage.cached_input_tokens,
         output_tokens=invocation.usage.output_tokens,

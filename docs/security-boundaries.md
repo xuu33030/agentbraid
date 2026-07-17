@@ -1,7 +1,7 @@
 # Security boundaries
 
 AgentBraid treats user goals, repository files, model output, command output, and MCP arguments as
-untrusted input. Its v0.1 controls reduce accidental credential exposure and prevent models from
+untrusted input. Its v0.2 controls reduce accidental credential exposure and prevent models from
 silently delivering changes outside the reviewed local workflow.
 
 ## Provider processes
@@ -11,7 +11,7 @@ silently delivering changes outside the reviewed local workflow.
 - The Codex child environment removes variables whose names indicate keys, tokens, credentials,
   passwords, authorization material, JWTs, or secrets. This includes Google, Antigravity,
   GitHub, cloud-provider, OpenAI, and Codex API-key variables.
-- Codex authentication for v0.1 therefore uses the user's existing `codex login` session. Raw API
+- Codex authentication therefore uses the user's existing `codex login` session. Raw API
   keys are not forwarded by AgentBraid.
 - Every child receives `AGENTBRAID_CHILD=1`; a nested AgentBraid server or run fails closed.
 - AgentBraid never launches `agy` and never reads Antigravity or Google credential storage.
@@ -36,6 +36,25 @@ JSONL events are not stored.
 
 Redaction is defense in depth, not a secret manager. Users must not place real credentials in
 goals, repositories, task results, or bug reports.
+
+## Local Dashboard
+
+- `agentbraid dashboard` binds only to IPv4 loopback (`127.0.0.1`) and does not accept a remote
+  bind address.
+- A random bootstrap token establishes one process-lifetime, HttpOnly, SameSite-strict browser
+  session. The bootstrap token is single-use and neither token is persisted.
+- Every state-changing request must match the Dashboard origin and provide the per-process CSRF
+  token. Invalid Host headers, unauthenticated requests, and cross-origin mutations fail closed.
+- Dashboard responses use a restrictive content security policy, deny framing, disable caching,
+  and load only assets bundled in the AgentBraid wheel. Repository and model text is rendered as
+  text rather than executable markup.
+- The Dashboard reads only the active state database. Its all-project view does not scan the
+  filesystem or discover unrelated custom databases.
+- Cancellation is persisted first. MCP-side planning, worker, and review invocations monitor the
+  durable status and terminate their Codex subprocess when another local AgentBraid process
+  cancels the run.
+- The Dashboard cannot start runs, claim host tasks, execute provider work, read provider
+  credentials, push, or deploy.
 
 ## Delivery
 

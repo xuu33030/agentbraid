@@ -11,6 +11,7 @@ from agentbraid.models import (
     CapabilitySnapshot,
     Executor,
     HostTaskResult,
+    ProviderInvocationOutcome,
     ProviderUsageRecord,
     RoutingDecision,
     RunPlan,
@@ -127,7 +128,7 @@ def test_delivery_target_and_provider_usage_survive_restart(tmp_path: Path) -> N
     assert snapshot.provider_usage[0].cached_input_tokens == 40
 
 
-def test_schema_v1_database_migrates_to_v2(tmp_path: Path) -> None:
+def test_schema_v1_database_migrates_to_v3(tmp_path: Path) -> None:
     database_path = tmp_path / "agentbraid.db"
     connection = sqlite3.connect(database_path)
     connection.executescript(
@@ -152,14 +153,132 @@ def test_schema_v1_database_migrates_to_v2(tmp_path: Path) -> None:
     StateStore(database_path)
 
     migrated = sqlite3.connect(database_path)
-    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
     run_columns = {row[1] for row in migrated.execute("PRAGMA table_info(runs)")}
-    assert {"base_branch", "base_commit"} <= run_columns
+    assert {"base_branch", "base_commit", "workspace"} <= run_columns
     usage_table = migrated.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_usage'"
     ).fetchone()
     assert usage_table is not None
+    usage_columns = {row[1] for row in migrated.execute("PRAGMA table_info(provider_usage)")}
+    assert {"attempt", "outcome"} <= usage_columns
     migrated.close()
+
+
+def test_schema_v2_database_migrates_workspace_and_usage_attribution(tmp_path: Path) -> None:
+    database_path = tmp_path / "agentbraid.db"
+    request = StartRunRequest(goal="Migrate me.", workspace="/tmp/example-workspace")
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            request_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            plan_json TEXT,
+            lead_thread_id TEXT,
+            integration_branch TEXT,
+            base_branch TEXT,
+            base_commit TEXT,
+            final_summary TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE provider_usage (
+            usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            task_id TEXT,
+            phase TEXT NOT NULL,
+            executor TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            cached_input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            reasoning_output_tokens INTEGER NOT NULL,
+            duration_seconds REAL NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 2;
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO runs (
+            run_id, request_json, status, created_at, updated_at
+        ) VALUES ('legacy-run', ?, 'completed', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """,
+        (request.model_dump_json(),),
+    )
+    connection.execute(
+        """
+        INSERT INTO provider_usage (
+            run_id, phase, executor, model, input_tokens, cached_input_tokens,
+            output_tokens, reasoning_output_tokens, duration_seconds, created_at
+        ) VALUES (
+            'legacy-run', 'planning', 'codex', 'gpt-test', 100, 40, 20, 5, 1.0,
+            '2026-01-01T00:00:00Z'
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    StateStore(database_path)
+
+    migrated = sqlite3.connect(database_path)
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert (
+        migrated.execute("SELECT workspace FROM runs WHERE run_id = 'legacy-run'").fetchone()[0]
+        == "/tmp/example-workspace"
+    )
+    assert migrated.execute(
+        "SELECT attempt, outcome FROM provider_usage WHERE run_id = 'legacy-run'"
+    ).fetchone() == (None, None)
+    migrated.close()
+
+
+def test_run_and_workspace_summaries_include_retry_usage(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "agentbraid.db")
+    first = store.create_run(
+        StartRunRequest(goal="First run.", workspace="/tmp/project-one"),
+        run_id="first-run",
+        base_branch="main",
+    )
+    store.create_run(
+        StartRunRequest(goal="Second run.", workspace="/tmp/project-two"),
+        run_id="second-run",
+    )
+    for attempt, outcome, input_tokens in (
+        (1, ProviderInvocationOutcome.FAILED, 100),
+        (2, ProviderInvocationOutcome.SUCCEEDED, 60),
+    ):
+        store.record_provider_usage(
+            first.run_id,
+            ProviderUsageRecord(
+                phase="task",
+                executor=Executor.CODEX,
+                model="gpt-test",
+                task_id="retry-task",
+                attempt=attempt,
+                outcome=outcome,
+                input_tokens=input_tokens,
+                output_tokens=20,
+            ),
+        )
+
+    all_runs = store.list_runs()
+    project_runs = store.list_runs(workspace="/tmp/project-one")
+    workspaces = store.list_workspaces()
+
+    assert {run.run_id for run in all_runs} == {"first-run", "second-run"}
+    assert [run.run_id for run in project_runs] == ["first-run"]
+    assert project_runs[0].observed_total_tokens == 200
+    assert project_runs[0].retry_tokens == 120
+    assert [(item.workspace, item.run_count) for item in workspaces] == [
+        ("/tmp/project-two", 1),
+        ("/tmp/project-one", 1),
+    ]
 
 
 def test_dependency_becomes_ready_after_parent_succeeds(tmp_path: Path) -> None:

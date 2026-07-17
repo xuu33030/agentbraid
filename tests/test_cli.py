@@ -8,7 +8,7 @@ from agentbraid.cli import main
 
 
 def test_version_is_alpha() -> None:
-    assert __version__ == "0.1.0a2"
+    assert __version__ == "0.2.0a1"
 
 
 def test_doctor_json_reports_checks(capsys: object, tmp_path: Path) -> None:
@@ -19,3 +19,28 @@ def test_doctor_json_reports_checks(capsys: object, tmp_path: Path) -> None:
     assert exit_code == 1
     assert [item["name"] for item in payload] == ["python", "git", "codex", "workspace"]
     assert payload[-1]["ok"] is False
+
+
+def test_dashboard_command_forwards_local_options(
+    monkeypatch: object,
+    tmp_path: Path,
+) -> None:
+    received: dict[str, object] = {}
+
+    def fake_dashboard(path: Path, *, port: int, open_browser: bool) -> None:
+        received.update(path=path, port=port, open_browser=open_browser)
+
+    monkeypatch.setattr("agentbraid.dashboard.run_dashboard", fake_dashboard)  # type: ignore[attr-defined]
+
+    exit_code = main(["dashboard", str(tmp_path), "--port", "8123", "--no-open"])
+
+    assert exit_code == 0
+    assert received == {"path": tmp_path, "port": 8123, "open_browser": False}
+
+
+def test_dashboard_command_reports_configuration_error(capsys: object, tmp_path: Path) -> None:
+    exit_code = main(["dashboard", str(tmp_path), "--port", "70000", "--no-open"])
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert exit_code == 1
+    assert "Dashboard port" in captured.err

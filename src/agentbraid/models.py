@@ -70,6 +70,14 @@ class TaskOutcome(StrEnum):
     BLOCKED = "blocked"
 
 
+class ProviderInvocationOutcome(StrEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class DeliveryMode(StrEnum):
     INTEGRATION_BRANCH = "integration_branch"
     REPORT_ONLY = "report_only"
@@ -201,6 +209,8 @@ class ProviderUsageRecord(StrictModel):
     executor: Executor
     model: str = Field(min_length=1, max_length=200)
     task_id: TaskId | None = None
+    attempt: int | None = Field(default=None, ge=1)
+    outcome: ProviderInvocationOutcome | None = None
     input_tokens: int = Field(default=0, ge=0)
     cached_input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
@@ -224,6 +234,48 @@ class RunSnapshot(StrictModel):
     provider_usage: list[ProviderUsageRecord] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class RunSummary(StrictModel):
+    run_id: str
+    workspace: str
+    goal: str
+    status: RunStatus
+    delivery_mode: DeliveryMode
+    base_branch: str | None = None
+    task_count: int = Field(default=0, ge=0)
+    succeeded_task_count: int = Field(default=0, ge=0)
+    failed_task_count: int = Field(default=0, ge=0)
+    observed_total_tokens: int = Field(default=0, ge=0)
+    retry_tokens: int = Field(default=0, ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkspaceSummary(StrictModel):
+    workspace: str
+    run_count: int = Field(default=0, ge=0)
+    active_run_count: int = Field(default=0, ge=0)
+    observed_total_tokens: int = Field(default=0, ge=0)
+    updated_at: datetime
+
+
+class RunEvent(StrictModel):
+    event_id: int = Field(ge=1)
+    run_id: str
+    task_id: TaskId | None = None
+    event_type: str = Field(min_length=1, max_length=100)
+    payload: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ApplyReadiness(StrictModel):
+    can_apply: bool
+    blockers: list[str] = Field(default_factory=list)
+    expected_branch: str | None = None
+    expected_commit: str | None = None
+    current_branch: str | None = None
+    current_commit: str | None = None
 
 
 class CapabilityStatus(StrEnum):
