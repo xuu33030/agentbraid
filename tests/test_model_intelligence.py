@@ -160,7 +160,7 @@ def test_subprocess_catalog_runner_enforces_timeout_and_stream_limit(tmp_path: P
     )
 
     assert success.returncode == 0
-    assert success.stdout == b"catalog-ok\n"
+    assert success.stdout.splitlines() == [b"catalog-ok"]
     with pytest.raises(_CatalogFailure, match="output exceeded"):
         runner.run(
             [sys.executable, "-I", "-S", "-c", "print('x' * 1000)"],
