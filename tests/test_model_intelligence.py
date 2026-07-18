@@ -4,9 +4,10 @@ import json
 import shlex
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -37,7 +38,7 @@ class FakeRunner(CatalogRunner):
 
     def run(
         self,
-        argv: list[str] | tuple[str, ...],
+        argv: Sequence[str],
         *,
         cwd: Path,
         timeout: int,
@@ -222,11 +223,14 @@ def test_codex_catalog_falls_back_to_bundled_and_observed_agy(tmp_path: Path) ->
     )
     intelligence = ModelIntelligence(tmp_path / "state", runner=runner)
 
-    options = intelligence.refresh_catalogs(
-        tmp_path,
-        codex_binary="codex",
-        observed_codex=["observed-codex"],
-        observed_host=["observed-agy"],
+    options = cast(
+        dict[str, Any],
+        intelligence.refresh_catalogs(
+            tmp_path,
+            codex_binary="codex",
+            observed_codex=["observed-codex"],
+            observed_host=["observed-agy"],
+        ),
     )
 
     assert options["codex"] == ["gpt-bundled", "observed-codex"]
@@ -254,11 +258,14 @@ def test_catalog_timeout_and_missing_binary_remain_manual_fallback(
         }
     )
 
-    options = ModelIntelligence(tmp_path / "state", runner=runner).refresh_catalogs(
-        tmp_path,
-        codex_binary="codex",
-        observed_codex=["manual-codex"],
-        observed_host=[],
+    options = cast(
+        dict[str, Any],
+        ModelIntelligence(tmp_path / "state", runner=runner).refresh_catalogs(
+            tmp_path,
+            codex_binary="codex",
+            observed_codex=["manual-codex"],
+            observed_host=[],
+        ),
     )
 
     assert options["codex"] == ["manual-codex"]
@@ -385,17 +392,23 @@ def test_recommendation_weights_change_at_five_samples_and_ignore_reference_data
         Executor.HOST: [],
     }
 
-    external_first = intelligence.recommend(
-        WorkloadComplexity.STANDARD,
-        small_sample,
-        [],
-        [],
+    external_first = cast(
+        dict[str, Any],
+        intelligence.recommend(
+            WorkloadComplexity.STANDARD,
+            small_sample,
+            [],
+            [],
+        ),
     )
-    local_first = intelligence.recommend(
-        WorkloadComplexity.STANDARD,
-        mature_sample,
-        [],
-        [],
+    local_first = cast(
+        dict[str, Any],
+        intelligence.recommend(
+            WorkloadComplexity.STANDARD,
+            mature_sample,
+            [],
+            [],
+        ),
     )
 
     assert external_first["codex"][0]["model"] == "gpt-external"
@@ -437,17 +450,23 @@ def test_effort_downgrades_without_auto_recommending_max_or_ultra(tmp_path: Path
         observed_host=[],
     )
 
-    complex_result = intelligence.recommend(
-        WorkloadComplexity.COMPLEX,
-        {},
-        [],
-        [],
+    complex_result = cast(
+        dict[str, Any],
+        intelligence.recommend(
+            WorkloadComplexity.COMPLEX,
+            {},
+            [],
+            [],
+        ),
     )
-    high_risk_result = intelligence.recommend(
-        WorkloadComplexity.HIGH_RISK,
-        {},
-        [],
-        [],
+    high_risk_result = cast(
+        dict[str, Any],
+        intelligence.recommend(
+            WorkloadComplexity.HIGH_RISK,
+            {},
+            [],
+            [],
+        ),
     )
 
     assert complex_result["codex"][0]["recommended_effort"] == "medium"
@@ -470,8 +489,14 @@ def test_agy_variants_follow_complexity_without_fabricated_scores(tmp_path: Path
         observed_host=[],
     )
 
-    quick = intelligence.recommend(WorkloadComplexity.QUICK, {}, [], [])
-    high_risk = intelligence.recommend(WorkloadComplexity.HIGH_RISK, {}, [], [])
+    quick = cast(
+        dict[str, Any],
+        intelligence.recommend(WorkloadComplexity.QUICK, {}, [], []),
+    )
+    high_risk = cast(
+        dict[str, Any],
+        intelligence.recommend(WorkloadComplexity.HIGH_RISK, {}, [], []),
+    )
 
     assert quick["agy"][0]["model"] == "Gemini Flash (Low)"
     assert high_risk["agy"][0]["model"] == "Claude Sonnet (Thinking)"
@@ -482,7 +507,7 @@ def test_guide_quotes_posix_and_powershell_injection_characters(tmp_path: Path) 
     workspace = tmp_path / "repo; touch escaped ' path"
     model = "Gemini'; Write-Output hacked; 'High"
 
-    guide = build_guide(workspace, model)
+    guide = cast(dict[str, Any], build_guide(workspace, model))
     posix_sections = guide["shells"]["posix"]
     powershell_sections = guide["shells"]["powershell"]
     posix_cd = posix_sections[0]["commands"][0]["command"]

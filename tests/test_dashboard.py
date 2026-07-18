@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from threading import Event
 
@@ -371,7 +372,7 @@ def test_dashboard_model_refresh_recommendation_and_guide_apis(tmp_path: Path) -
     class Runner:
         def run(
             self,
-            argv: list[str],
+            argv: Sequence[str],
             *,
             cwd: Path,
             timeout: int,
