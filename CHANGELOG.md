@@ -7,6 +7,32 @@ uses semantic versioning after the alpha contract stabilizes.
 
 ## [Unreleased]
 
+## [0.2.0-alpha.3] - 2026-07-18
+
+### Added
+
+- Add a fixed Dashboard usage guide with safe POSIX and PowerShell commands, per-command and
+  copy-all controls, AGY TUI shortcuts, keyboard focus handling, and a mobile full-width panel.
+- Add user-triggered Codex and AGY model catalogs, quality-first complexity recommendations,
+  evidence details, explicit apply controls, and editable manual model fallback.
+- Add an opt-in, versioned external model-intelligence manifest with fixed HTTPS retrieval,
+  validation, source/license policy, atomic local caching, and reference-only source display.
+
+### Changed
+
+- Pass optional Codex reasoning effort through immutable run settings and CLI config overrides;
+  `max` and `ultra` remain manual-only choices.
+- Upgrade SQLite state to schema v5 with nullable reasoning-effort usage attribution and sequential
+  migration from schemas v1 through v4.
+- Upgrade the Python package to `0.2.0a3`; the intended release tag is `v0.2.0-alpha.3`.
+
+### Security
+
+- Execute model discovery only through fixed, shell-free `codex debug models` and `agy models`
+  argument vectors with time and output limits; never start the AGY TUI or read its credentials.
+- Generate shell commands server-side with platform-specific quoting and never open or control the
+  user's operating-system terminal from the browser.
+
 ## [0.2.0-alpha.2] - 2026-07-18
 
 ### Added
@@ -109,7 +135,8 @@ uses semantic versioning after the alpha contract stabilizes.
 - Integration conflicts require a new bounded repair run; AgentBraid does not force-resolve,
   push, deploy, or publish changes.
 
-[Unreleased]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.2...HEAD
+[Unreleased]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.3...HEAD
+[0.2.0-alpha.3]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.2...v0.2.0-alpha.3
 [0.2.0-alpha.2]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.2...v0.2.0-alpha.1
 [0.1.0-alpha.2]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.1...v0.1.0-alpha.2

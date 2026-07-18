@@ -43,7 +43,7 @@ from agentbraid.models import (
 )
 from agentbraid.redaction import redact_model, redact_text, redact_value
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset({RunStatus.PLANNING, RunStatus.CANCELLED, RunStatus.FAILED}),
@@ -185,6 +185,7 @@ class StateStore:
                         phase TEXT NOT NULL,
                         executor TEXT NOT NULL,
                         model TEXT NOT NULL,
+                        reasoning_effort TEXT,
                         attempt INTEGER,
                         outcome TEXT,
                         input_tokens INTEGER NOT NULL,
@@ -273,6 +274,49 @@ class StateStore:
                     );
                     """
                 )
+                connection.execute("PRAGMA user_version = 4")
+                version = 4
+            if version == 4:
+                usage_table = connection.execute(
+                    """
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'table' AND name = 'provider_usage'
+                    """
+                ).fetchone()
+                if usage_table is None:
+                    connection.executescript(
+                        """
+                        CREATE TABLE provider_usage (
+                            usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            run_id TEXT NOT NULL,
+                            task_id TEXT,
+                            phase TEXT NOT NULL,
+                            executor TEXT NOT NULL,
+                            model TEXT NOT NULL,
+                            reasoning_effort TEXT,
+                            attempt INTEGER,
+                            outcome TEXT,
+                            input_tokens INTEGER NOT NULL,
+                            cached_input_tokens INTEGER NOT NULL,
+                            output_tokens INTEGER NOT NULL,
+                            reasoning_output_tokens INTEGER NOT NULL,
+                            duration_seconds REAL NOT NULL,
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+                        );
+                        CREATE INDEX provider_usage_run_idx
+                            ON provider_usage(run_id, usage_id);
+                        """
+                    )
+                else:
+                    usage_columns = {
+                        str(row["name"])
+                        for row in connection.execute("PRAGMA table_info(provider_usage)")
+                    }
+                    if "reasoning_effort" not in usage_columns:
+                        connection.execute(
+                            "ALTER TABLE provider_usage ADD COLUMN reasoning_effort TEXT"
+                        )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -534,6 +578,77 @@ class StateStore:
                 (executor.value, executor.value),
             ).fetchall()
         return [str(row["model"]) for row in rows]
+
+    def list_model_statistics(self, executor: Executor) -> list[dict[str, object]]:
+        aggregate = """
+            SELECT
+                model,
+                {effort} AS reasoning_effort,
+                COUNT(*) AS invocations,
+                SUM(CASE WHEN outcome IN ('succeeded', 'approved') THEN 1 ELSE 0 END)
+                    AS successes,
+                SUM(CASE WHEN outcome IN (
+                    'succeeded', 'approved', 'failed', 'blocked', 'rejected'
+                ) THEN 1 ELSE 0 END) AS samples,
+                SUM(CASE WHEN attempt > 1 THEN 1 ELSE 0 END) AS retry_invocations,
+                AVG(input_tokens + output_tokens) AS average_tokens,
+                AVG(duration_seconds) AS average_duration_seconds
+            FROM provider_usage
+            WHERE executor = ? {effort_filter}
+            GROUP BY model{group_effort}
+            ORDER BY model
+        """
+        with self._connect() as connection:
+            model_rows = connection.execute(
+                aggregate.format(effort="NULL", effort_filter="", group_effort=""),
+                (executor.value,),
+            ).fetchall()
+            effort_rows = connection.execute(
+                aggregate.format(
+                    effort="reasoning_effort",
+                    effort_filter="AND reasoning_effort IS NOT NULL",
+                    group_effort=", reasoning_effort",
+                ),
+                (executor.value,),
+            ).fetchall()
+            capability_rows = connection.execute(
+                """
+                SELECT model, successes, failures, total_latency_seconds
+                FROM capabilities
+                WHERE executor = ?
+                """,
+                (executor.value,),
+            ).fetchall()
+
+        statistics = [_statistics_row(row, "model") for row in model_rows]
+        statistics.extend(_statistics_row(row, "effort") for row in effort_rows)
+        by_model = {str(item["model"]): item for item in statistics if item["scope"] == "model"}
+        for row in capability_rows:
+            model = str(row["model"])
+            successes = int(row["successes"])
+            failures = int(row["failures"])
+            samples = successes + failures
+            existing = by_model.get(model)
+            if existing is not None and cast(int, existing["samples"]) > 0:
+                continue
+            capability_statistic: dict[str, object] = {
+                "model": model,
+                "reasoning_effort": None,
+                "scope": "model",
+                "successes": successes,
+                "samples": samples,
+                "invocations": samples,
+                "retry_invocations": 0,
+                "average_tokens": 0.0,
+                "average_duration_seconds": (
+                    float(row["total_latency_seconds"]) / samples if samples else 0.0
+                ),
+            }
+            if existing is None:
+                statistics.append(capability_statistic)
+            else:
+                existing.update(capability_statistic)
+        return statistics
 
     def delete_run_record(self, run_id: str) -> None:
         with self._transaction(immediate=True) as connection:
@@ -1105,10 +1220,11 @@ class StateStore:
             connection.execute(
                 """
                 INSERT INTO provider_usage (
-                    run_id, task_id, phase, executor, model, attempt, outcome, input_tokens,
+                    run_id, task_id, phase, executor, model, reasoning_effort, attempt, outcome,
+                    input_tokens,
                     cached_input_tokens, output_tokens, reasoning_output_tokens,
                     duration_seconds, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -1116,6 +1232,7 @@ class StateStore:
                     usage.phase,
                     usage.executor.value,
                     usage.model,
+                    usage.reasoning_effort.value if usage.reasoning_effort is not None else None,
                     usage.attempt,
                     usage.outcome.value if usage.outcome is not None else None,
                     usage.input_tokens,
@@ -1304,6 +1421,7 @@ class StateStore:
                     phase=usage_row["phase"],
                     executor=Executor(usage_row["executor"]),
                     model=usage_row["model"],
+                    reasoning_effort=usage_row["reasoning_effort"],
                     task_id=usage_row["task_id"],
                     attempt=(
                         int(usage_row["attempt"]) if usage_row["attempt"] is not None else None
@@ -1415,6 +1533,20 @@ class StateStore:
                 _dump_datetime(created_at),
             ),
         )
+
+
+def _statistics_row(row: sqlite3.Row, scope: str) -> dict[str, object]:
+    return {
+        "model": str(row["model"]),
+        "reasoning_effort": row["reasoning_effort"],
+        "scope": scope,
+        "successes": int(row["successes"] or 0),
+        "samples": int(row["samples"] or 0),
+        "invocations": int(row["invocations"] or 0),
+        "retry_invocations": int(row["retry_invocations"] or 0),
+        "average_tokens": float(row["average_tokens"] or 0),
+        "average_duration_seconds": float(row["average_duration_seconds"] or 0),
+    }
 
 
 def _dump_datetime(value: datetime) -> str:

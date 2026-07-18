@@ -9,6 +9,7 @@ import pytest
 from agentbraid.errors import InvalidTransitionError, RunNotFoundError, StateError
 from agentbraid.models import (
     CapabilitySnapshot,
+    CodexReasoningEffort,
     Executor,
     HostTaskResult,
     LocalizedRunNames,
@@ -115,6 +116,8 @@ def test_delivery_target_and_provider_usage_survive_restart(tmp_path: Path) -> N
             phase="planning",
             executor=Executor.CODEX,
             model="gpt-test",
+            reasoning_effort=CodexReasoningEffort.HIGH,
+            outcome=ProviderInvocationOutcome.SUCCEEDED,
             input_tokens=100,
             cached_input_tokens=40,
             output_tokens=20,
@@ -129,9 +132,14 @@ def test_delivery_target_and_provider_usage_survive_restart(tmp_path: Path) -> N
     assert snapshot.base_commit == "a" * 40
     assert len(snapshot.provider_usage) == 1
     assert snapshot.provider_usage[0].cached_input_tokens == 40
+    assert snapshot.provider_usage[0].reasoning_effort == CodexReasoningEffort.HIGH
+    statistics = StateStore(database_path).list_model_statistics(Executor.CODEX)
+    effort_statistic = next(item for item in statistics if item["scope"] == "effort")
+    assert effort_statistic["reasoning_effort"] == "high"
+    assert effort_statistic["successes"] == 1
 
 
-def test_schema_v1_database_migrates_to_v4(tmp_path: Path) -> None:
+def test_schema_v1_database_migrates_to_v5(tmp_path: Path) -> None:
     database_path = tmp_path / "agentbraid.db"
     connection = sqlite3.connect(database_path)
     connection.executescript(
@@ -156,7 +164,7 @@ def test_schema_v1_database_migrates_to_v4(tmp_path: Path) -> None:
     StateStore(database_path)
 
     migrated = sqlite3.connect(database_path)
-    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
     run_columns = {row[1] for row in migrated.execute("PRAGMA table_info(runs)")}
     assert {
         "base_branch",
@@ -170,7 +178,7 @@ def test_schema_v1_database_migrates_to_v4(tmp_path: Path) -> None:
     ).fetchone()
     assert usage_table is not None
     usage_columns = {row[1] for row in migrated.execute("PRAGMA table_info(provider_usage)")}
-    assert {"attempt", "outcome"} <= usage_columns
+    assert {"attempt", "outcome", "reasoning_effort"} <= usage_columns
     settings_table = migrated.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_settings'"
     ).fetchone()
@@ -240,14 +248,17 @@ def test_schema_v2_database_migrates_workspace_and_usage_attribution(tmp_path: P
     StateStore(database_path)
 
     migrated = sqlite3.connect(database_path)
-    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
     assert (
         migrated.execute("SELECT workspace FROM runs WHERE run_id = 'legacy-run'").fetchone()[0]
         == "/tmp/example-workspace"
     )
     assert migrated.execute(
-        "SELECT attempt, outcome FROM provider_usage WHERE run_id = 'legacy-run'"
-    ).fetchone() == (None, None)
+        """
+        SELECT attempt, outcome, reasoning_effort
+        FROM provider_usage WHERE run_id = 'legacy-run'
+        """
+    ).fetchone() == (None, None, None)
     migrated.close()
 
 
@@ -281,12 +292,56 @@ def test_schema_v3_database_migrates_names_settings_and_workspace_defaults(
     StateStore(database_path)
 
     migrated = sqlite3.connect(database_path)
-    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
     run_columns = {row[1] for row in migrated.execute("PRAGMA table_info(runs)")}
     assert {"display_names_json", "execution_settings_json"} <= run_columns
     assert migrated.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_settings'"
     ).fetchone() == ("workspace_settings",)
+    migrated.close()
+
+
+def test_schema_v4_database_preserves_usage_with_null_effort(tmp_path: Path) -> None:
+    database_path = tmp_path / "agentbraid.db"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE provider_usage (
+            usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            task_id TEXT,
+            phase TEXT NOT NULL,
+            executor TEXT NOT NULL,
+            model TEXT NOT NULL,
+            attempt INTEGER,
+            outcome TEXT,
+            input_tokens INTEGER NOT NULL,
+            cached_input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            reasoning_output_tokens INTEGER NOT NULL,
+            duration_seconds REAL NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO provider_usage (
+            run_id, phase, executor, model, attempt, outcome, input_tokens,
+            cached_input_tokens, output_tokens, reasoning_output_tokens,
+            duration_seconds, created_at
+        ) VALUES (
+            'legacy', 'planning', 'codex', 'gpt-legacy', 1, 'succeeded',
+            10, 2, 3, 1, 0.5, '2026-01-01T00:00:00Z'
+        );
+        PRAGMA user_version = 4;
+        """
+    )
+    connection.close()
+
+    StateStore(database_path)
+
+    migrated = sqlite3.connect(database_path)
+    assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert migrated.execute(
+        "SELECT reasoning_effort FROM provider_usage WHERE run_id = 'legacy'"
+    ).fetchone() == (None,)
     migrated.close()
 
 

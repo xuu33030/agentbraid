@@ -17,6 +17,10 @@ const state = {
   runs: [],
   capabilities: [],
   modelOptions: { codex: [], host: [] },
+  guide: null,
+  guideShell: "posix",
+  guideReturnFocus: null,
+  recommendations: { start: null, settings: null },
   selectedRunIds: new Set(),
   deletePreviews: [],
   selectedRunId: null,
@@ -36,6 +40,7 @@ const state = {
 const elements = {
   workspaceSelect: document.getElementById("workspace-select"),
   languageSelect: document.getElementById("language-select"),
+  guideButton: document.getElementById("guide-button"),
   refreshButton: document.getElementById("refresh-button"),
   settingsButton: document.getElementById("settings-button"),
   startRunButton: document.getElementById("start-run-button"),
@@ -49,6 +54,8 @@ const elements = {
   runList: document.getElementById("run-list"),
   loadMoreButton: document.getElementById("load-more-button"),
   emptyState: document.getElementById("empty-state"),
+  emptyGuideButton: document.getElementById("empty-guide-button"),
+  emptyStartButton: document.getElementById("empty-start-button"),
   runDetail: document.getElementById("run-detail"),
   runStatus: document.getElementById("run-status"),
   runId: document.getElementById("run-id"),
@@ -92,6 +99,7 @@ const elements = {
   startGoal: document.getElementById("start-goal"),
   startConstraints: document.getElementById("start-constraints"),
   startCodexModel: document.getElementById("start-codex-model"),
+  startCodexEffort: document.getElementById("start-codex-effort"),
   startHostModel: document.getElementById("start-host-model"),
   startRouting: document.getElementById("start-routing"),
   startDelivery: document.getElementById("start-delivery"),
@@ -100,12 +108,16 @@ const elements = {
   startAttempts: document.getElementById("start-attempts"),
   startTimeout: document.getElementById("start-timeout"),
   startOutputBytes: document.getElementById("start-output-bytes"),
+  startComplexity: document.getElementById("start-complexity"),
+  startRecommendButton: document.getElementById("start-recommend-button"),
+  startRecommendations: document.getElementById("start-recommendations"),
   startSaveDefaults: document.getElementById("start-save-defaults"),
   settingsDialog: document.getElementById("settings-dialog"),
   settingsForm: document.getElementById("settings-form"),
   closeSettings: document.getElementById("close-settings"),
   settingsWorkspace: document.getElementById("settings-workspace"),
   settingsCodexModel: document.getElementById("settings-codex-model"),
+  settingsCodexEffort: document.getElementById("settings-codex-effort"),
   settingsHostModel: document.getElementById("settings-host-model"),
   settingsRouting: document.getElementById("settings-routing"),
   settingsDelivery: document.getElementById("settings-delivery"),
@@ -119,6 +131,9 @@ const elements = {
   settingsDatabasePath: document.getElementById("settings-database-path"),
   settingsStateDir: document.getElementById("settings-state-dir"),
   settingsRestartNote: document.getElementById("settings-restart-note"),
+  settingsComplexity: document.getElementById("settings-complexity"),
+  settingsRecommendButton: document.getElementById("settings-recommend-button"),
+  settingsRecommendations: document.getElementById("settings-recommendations"),
   renameDialog: document.getElementById("rename-dialog"),
   renameForm: document.getElementById("rename-form"),
   closeRename: document.getElementById("close-rename"),
@@ -133,6 +148,19 @@ const elements = {
   confirmDelete: document.getElementById("confirm-delete"),
   codexModelOptions: document.getElementById("codex-model-options"),
   hostModelOptions: document.getElementById("host-model-options"),
+  guideOverlay: document.getElementById("guide-overlay"),
+  guideDrawer: document.getElementById("guide-drawer"),
+  closeGuide: document.getElementById("close-guide"),
+  shellPosix: document.getElementById("shell-posix"),
+  shellPowershell: document.getElementById("shell-powershell"),
+  guideCopyAll: document.getElementById("guide-copy-all"),
+  guideCommandSections: document.getElementById("guide-command-sections"),
+  guideAgyCommands: document.getElementById("guide-agy-commands"),
+  includeExternalScores: document.getElementById("include-external-scores"),
+  refreshModelsButton: document.getElementById("refresh-models-button"),
+  catalogStatus: document.getElementById("catalog-status"),
+  sourceFilter: document.getElementById("source-filter"),
+  modelSourceList: document.getElementById("model-source-list"),
   toast: document.getElementById("toast"),
 };
 
@@ -183,6 +211,21 @@ const valueLabels = {
   workspaceMode: {
     worktree_write: ["workspaceMode.worktree_write", "Isolated worktree writes"],
     read_only: ["workspaceMode.read_only", "Read-only"],
+  },
+  effort: {
+    "": ["effort.default", "CLI default"],
+    low: ["effort.low", "Low"],
+    medium: ["effort.medium", "Medium"],
+    high: ["effort.high", "High"],
+    xhigh: ["effort.xhigh", "Extra high"],
+    max: ["effort.max", "Max"],
+    ultra: ["effort.ultra", "Ultra"],
+  },
+  complexity: {
+    quick: ["complexity.quick", "Quick"],
+    standard: ["complexity.standard", "Standard"],
+    complex: ["complexity.complex", "Complex"],
+    high_risk: ["complexity.highRisk", "High risk"],
   },
   artifactKind: {
     database: ["cleanup.database", "Database records"],
@@ -341,6 +384,13 @@ function applyLocale(locale, { persist = false, announce = false, rerender = tru
     renderRunList();
     renderScopeSummary();
     renderDeletePreview();
+    renderModelSources();
+    renderCatalogStatus();
+    if (state.guide) {
+      renderGuide();
+    }
+    renderRecommendations("start");
+    renderRecommendations("settings");
     if (state.detail) {
       renderRunDetail({ clearMessage: false });
     } else {
@@ -509,6 +559,8 @@ function renderModelOptions() {
   };
   render(elements.codexModelOptions, state.modelOptions.codex || []);
   render(elements.hostModelOptions, state.modelOptions.host || []);
+  renderModelSources();
+  renderCatalogStatus();
 }
 
 function renderConfigurationOptionLabels() {
@@ -519,6 +571,10 @@ function renderConfigurationOptionLabels() {
     [elements.settingsDelivery, "deliveryMode"],
     [elements.startWorkspaceMode, "workspaceMode"],
     [elements.settingsWorkspaceMode, "workspaceMode"],
+    [elements.startCodexEffort, "effort"],
+    [elements.settingsCodexEffort, "effort"],
+    [elements.startComplexity, "complexity"],
+    [elements.settingsComplexity, "complexity"],
   ];
   for (const [select, group] of mappings) {
     for (const option of select.options) {
@@ -1145,6 +1201,7 @@ function renderUsageTable(records) {
   const columns = [
     ["table.phaseTask", "Phase / task"],
     ["table.model", "Model"],
+    ["table.effort", "Effort"],
     ["table.attempt", "Attempt"],
     ["table.outcome", "Outcome"],
     ["table.input", "Input"],
@@ -1160,7 +1217,7 @@ function renderUsageTable(records) {
       "subtle empty-table-cell",
       t("table.noRecords", "No provider invocation records."),
     );
-    cell.colSpan = 9;
+    cell.colSpan = 10;
     row.append(cell);
     elements.usageTableBody.replaceChildren(row);
     return;
@@ -1172,6 +1229,7 @@ function renderUsageTable(records) {
     const values = [
       [label, ""],
       [record.model, "mono"],
+      [record.reasoning_effort ? translatedValue("effort", record.reasoning_effort) : t("common.notAvailable", "—"), ""],
       [
         record.phase === "task"
           ? (record.attempt ?? t("table.legacy", "legacy"))
@@ -1371,6 +1429,7 @@ async function workspaceSettings(workspace) {
 
 function populateStartSettings(settings) {
   elements.startCodexModel.value = settings.codex_model || "";
+  elements.startCodexEffort.value = settings.codex_reasoning_effort || "";
   elements.startHostModel.value = settings.host_model;
   elements.startRouting.value = settings.routing_mode;
   elements.startDelivery.value = settings.delivery_mode;
@@ -1384,6 +1443,7 @@ function populateStartSettings(settings) {
 function settingsFieldMap() {
   return {
     codex_model: elements.settingsCodexModel,
+    codex_reasoning_effort: elements.settingsCodexEffort,
     max_parallel_codex: elements.settingsParallel,
     max_task_attempts: elements.settingsAttempts,
     codex_timeout_seconds: elements.settingsTimeout,
@@ -1397,6 +1457,7 @@ function populateSettingsForm(payload) {
   const settings = payload.settings;
   elements.settingsWorkspace.value = settings.workspace;
   elements.settingsCodexModel.value = settings.codex_model || "";
+  elements.settingsCodexEffort.value = settings.codex_reasoning_effort || "";
   elements.settingsHostModel.value = settings.host_model;
   elements.settingsRouting.value = settings.routing_mode;
   elements.settingsDelivery.value = settings.delivery_mode;
@@ -1435,6 +1496,7 @@ function startRequestPayload() {
       delivery_mode: elements.startDelivery.value,
       execution: {
         codex_model: codexModel || null,
+        codex_reasoning_effort: elements.startCodexEffort.value || null,
         host_model: hostModel,
         routing_mode: elements.startRouting.value,
         delivery_mode: elements.startDelivery.value,
@@ -1456,6 +1518,7 @@ function settingsRequestPayload() {
       workspace: elements.settingsWorkspace.value,
       codex_binary: elements.settingsCodexBinary.value.trim(),
       codex_model: codexModel || null,
+      codex_reasoning_effort: elements.settingsCodexEffort.value || null,
       host_model: elements.settingsHostModel.value.trim(),
       routing_mode: elements.settingsRouting.value,
       delivery_mode: elements.settingsDelivery.value,
@@ -1480,6 +1543,8 @@ async function openStartRunDialog() {
   const payload = await workspaceSettings(workspace);
   populateStartSettings(payload.settings);
   elements.startSaveDefaults.checked = false;
+  state.recommendations.start = null;
+  renderRecommendations("start");
   elements.startRunDialog.showModal();
   elements.startGoal.focus();
 }
@@ -1492,7 +1557,460 @@ async function openSettingsDialog() {
   renderActionWorkspaceOptions();
   elements.settingsWorkspace.value = workspace;
   populateSettingsForm(await workspaceSettings(workspace));
+  state.recommendations.settings = null;
+  renderRecommendations("settings");
   elements.settingsDialog.showModal();
+}
+
+function commandLabel(commandId) {
+  const labels = {
+    cd: ["guide.command.cd", "Enter workspace"],
+    doctor: ["guide.command.doctor", "Check prerequisites"],
+    init: ["guide.command.init", "Install AgentBraid integration"],
+    agy: ["guide.command.agy", "Start AGY with model"],
+    dashboard: ["guide.command.dashboard", "Open Dashboard"],
+    model: ["guide.command.model", "Choose model"],
+    mcp: ["guide.command.mcp", "Inspect MCP servers"],
+    skills: ["guide.command.skills", "Inspect skills"],
+    agentbraid: ["guide.command.agentbraid", "Run AgentBraid skill"],
+  };
+  const label = labels[commandId] || ["guide.command.generic", "Command"];
+  return t(label[0], label[1]);
+}
+
+function copyButton(text, { compact = false } = {}) {
+  const button = createElement(
+    "button",
+    `button secondary copy-button${compact ? " compact" : ""}`,
+    t("action.copy", "Copy"),
+  );
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    try {
+      await copyText(text);
+      showToast(t("toast.copied", "Copied to clipboard."));
+    } catch (_error) {
+      showToast(t("toast.copyFailed", "Could not copy. Select the command manually."));
+    }
+  });
+  return button;
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (_error) {
+    }
+  }
+  const fallback = document.createElement("textarea");
+  fallback.value = text;
+  fallback.readOnly = true;
+  fallback.className = "clipboard-fallback";
+  fallback.setAttribute("aria-hidden", "true");
+  document.body.append(fallback);
+  fallback.select();
+  const copied = document.execCommand("copy");
+  fallback.remove();
+  if (!copied) {
+    throw new Error("clipboard unavailable");
+  }
+}
+
+function renderCommand(command, { compact = false } = {}) {
+  const row = createElement("div", `command-row${compact ? " compact" : ""}`);
+  const copy = createElement("div", "command-copy");
+  copy.append(
+    createElement("span", "command-label", commandLabel(command.id)),
+    createElement("code", "command-code", command.command),
+  );
+  row.append(copy, copyButton(command.command, { compact }));
+  return row;
+}
+
+function renderGuide() {
+  if (!state.guide) {
+    elements.guideCommandSections.replaceChildren(
+      createElement("p", "note", t("guide.loading", "Loading guide…")),
+    );
+    return;
+  }
+  const sections = state.guide.shells?.[state.guideShell] || [];
+  const sectionNames = {
+    first_setup: ["guide.section.firstSetup", "First setup"],
+    daily_start: ["guide.section.dailyStart", "Daily startup"],
+    model_setup: ["guide.section.modelSetup", "Model setup"],
+  };
+  const sectionNodes = sections.map((section) => {
+    const article = createElement("section", "guide-section");
+    const heading = createElement("div", "guide-section-heading");
+    const label = sectionNames[section.id] || ["guide.section.commands", "Commands"];
+    heading.append(createElement("h3", "", t(label[0], label[1])));
+    const allCommands = section.commands.map((command) => command.command).join("\n");
+    const copyAll = copyButton(allCommands, { compact: true });
+    copyAll.textContent = t("action.copyAll", "Copy all");
+    heading.append(copyAll);
+    const list = createElement("div", "command-list");
+    list.append(...section.commands.map((command) => renderCommand(command)));
+    article.append(heading, list);
+    return article;
+  });
+  elements.guideCommandSections.replaceChildren(...sectionNodes);
+  elements.guideAgyCommands.replaceChildren(
+    ...(state.guide.agy_tui || []).map((command) => renderCommand(command, { compact: true })),
+  );
+  for (const tab of [elements.shellPosix, elements.shellPowershell]) {
+    const selected = tab.dataset.shell === state.guideShell;
+    tab.classList.toggle("active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+  }
+}
+
+async function loadGuide(agyModel = "") {
+  const workspace = concreteWorkspace();
+  if (!workspace) {
+    return;
+  }
+  const parameters = { workspace };
+  if (agyModel.trim()) {
+    parameters.agy_model = agyModel.trim();
+  }
+  const query = new URLSearchParams(parameters);
+  state.guide = await api(`/api/v1/guide?${query.toString()}`);
+  renderGuide();
+}
+
+async function openGuide(trigger = null) {
+  const workspace = concreteWorkspace();
+  if (!workspace) {
+    return;
+  }
+  state.guideReturnFocus = trigger || document.activeElement;
+  state.guide = null;
+  renderGuide();
+  elements.guideOverlay.hidden = false;
+  elements.guideDrawer.hidden = false;
+  document.body.classList.add("drawer-open");
+  elements.closeGuide.focus();
+  try {
+    await loadGuide();
+  } catch (error) {
+    closeGuide();
+    throw error;
+  }
+}
+
+function closeGuide() {
+  elements.guideOverlay.hidden = true;
+  elements.guideDrawer.hidden = true;
+  document.body.classList.remove("drawer-open");
+  if (state.guideReturnFocus instanceof HTMLElement) {
+    state.guideReturnFocus.focus();
+  }
+  state.guideReturnFocus = null;
+}
+
+function trapGuideFocus(event) {
+  if (elements.guideDrawer.hidden || event.key !== "Tab") {
+    return;
+  }
+  const focusable = [...elements.guideDrawer.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]',
+  )];
+  if (!focusable.length) {
+    event.preventDefault();
+    elements.guideDrawer.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function renderModelSources() {
+  const intelligence = state.modelOptions.intelligence;
+  if (!intelligence) {
+    elements.modelSourceList.replaceChildren(
+      createElement("p", "note", t("sources.unavailable", "Source details unavailable.")),
+    );
+    return;
+  }
+  const summary = createElement("p", "source-summary");
+  summary.textContent = t(
+    "sources.manifestSummary",
+    "Manifest {version} · {date} · {origin}",
+    {
+      version: intelligence.manifest_version,
+      date: intelligence.generated_at,
+      origin: t(`sources.origin.${intelligence.origin}`, intelligence.origin),
+    },
+  );
+  const currentFilter = elements.sourceFilter.value;
+  const filterOptions = [createElement("option", "", t("sources.all", "All sources"))];
+  filterOptions[0].value = "";
+  for (const source of intelligence.sources || []) {
+    const option = createElement("option", "", source.name);
+    option.value = source.source_id;
+    filterOptions.push(option);
+  }
+  elements.sourceFilter.replaceChildren(...filterOptions);
+  elements.sourceFilter.value = filterOptions.some((option) => option.value === currentFilter)
+    ? currentFilter
+    : "";
+  const selectedSource = elements.sourceFilter.value;
+  const sourceCards = (intelligence.sources || []).filter(
+    (source) => !selectedSource || source.source_id === selectedSource,
+  ).map((source) => {
+    const card = createElement("article", "source-card");
+    const header = createElement("div", "source-card-header");
+    const link = createElement("a", "source-link", source.name);
+    link.href = source.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    header.append(
+      link,
+      createElement(
+        "span",
+        `source-license ${source.license_status}`,
+        t(`sources.license.${source.license_status}`, source.license_status),
+      ),
+    );
+    card.append(header, createElement("p", "note", source.notes || source.url));
+    const entries = (intelligence.entries || []).filter(
+      (entry) => entry.source_id === source.source_id,
+    );
+    if (entries.length) {
+      const detailList = createElement("ul", "source-entry-list");
+      for (const entry of entries) {
+        const status = entry.eligible
+          ? t("sources.eligible", "used")
+          : t("sources.referenceOnly", "reference only");
+        const item = createElement("li");
+        const entryLink = createElement(
+          "a",
+          "source-link",
+          `${entry.model} · ${entry.benchmark}`,
+        );
+        entryLink.href = entry.source_url;
+        entryLink.target = "_blank";
+        entryLink.rel = "noopener noreferrer";
+        item.append(
+          entryLink,
+          document.createTextNode(
+            ` · ${entry.raw_score} [${entry.scale_min}–${entry.scale_max}] · ${entry.version} · ${entry.source_date} · ${status}`,
+          ),
+        );
+        detailList.append(item);
+      }
+      card.append(detailList);
+    }
+    return card;
+  });
+  elements.modelSourceList.replaceChildren(summary, ...sourceCards);
+}
+
+function renderCatalogStatus() {
+  const catalogs = state.modelOptions.catalogs;
+  if (!catalogs) {
+    elements.catalogStatus.textContent = t("catalog.notRefreshed", "Catalogs not refreshed.");
+    return;
+  }
+  const codex = catalogs.codex?.status || "not_refreshed";
+  const agy = catalogs.agy?.status || "not_refreshed";
+  elements.catalogStatus.textContent = t(
+    "catalog.summary",
+    "Codex: {codex} · AGY: {agy}",
+    {
+      codex: t(`catalog.status.${codex}`, codex),
+      agy: t(`catalog.status.${agy}`, agy),
+    },
+  );
+}
+
+async function refreshModelOptions() {
+  const workspace = concreteWorkspace();
+  if (!workspace) {
+    return;
+  }
+  elements.refreshModelsButton.disabled = true;
+  try {
+    state.modelOptions = await api("/api/v1/model-options/refresh", {
+      method: "POST",
+      body: JSON.stringify({
+        workspace,
+        include_external: elements.includeExternalScores.checked,
+      }),
+    });
+    renderModelOptions();
+    const externalStatus = state.modelOptions.external_update?.status;
+    if (externalStatus === "failed") {
+      showToast(t("toast.externalUpdateFailed", "Models refreshed; external scores kept the previous cache."));
+    } else {
+      showToast(t("toast.modelsRefreshed", "Model catalogs refreshed."));
+    }
+  } finally {
+    elements.refreshModelsButton.disabled = false;
+  }
+}
+
+function recommendationElements(context) {
+  return context === "start"
+    ? {
+      workspace: elements.startWorkspace,
+      complexity: elements.startComplexity,
+      results: elements.startRecommendations,
+      codexModel: elements.startCodexModel,
+      codexEffort: elements.startCodexEffort,
+      hostModel: elements.startHostModel,
+    }
+    : {
+      workspace: elements.settingsWorkspace,
+      complexity: elements.settingsComplexity,
+      results: elements.settingsRecommendations,
+      codexModel: elements.settingsCodexModel,
+      codexEffort: elements.settingsCodexEffort,
+      hostModel: elements.settingsHostModel,
+    };
+}
+
+async function loadRecommendations(context) {
+  const controls = recommendationElements(context);
+  const query = new URLSearchParams({
+    workspace: controls.workspace.value,
+    complexity: controls.complexity.value,
+  });
+  state.recommendations[context] = await api(
+    `/api/v1/model-recommendations?${query.toString()}`,
+  );
+  renderRecommendations(context);
+}
+
+function recommendationCard(harness, candidates) {
+  const card = createElement("article", `recommendation-card ${harness}`);
+  card.append(createElement(
+    "h3",
+    "",
+    harness === "codex" ? t("executor.codex", "Codex") : t("recommend.agy", "AGY"),
+  ));
+  if (!candidates.length) {
+    card.append(createElement(
+      "p",
+      "note",
+      t("recommend.none", "Refresh the catalog or enter a model manually."),
+    ));
+    return card;
+  }
+  const top = candidates[0];
+  const heading = createElement("div", "recommendation-topline");
+  heading.append(
+    createElement("strong", "", top.display_name || top.model),
+    createElement(
+      "span",
+      `confidence ${top.confidence}`,
+      t(`confidence.${top.confidence}`, top.confidence),
+    ),
+  );
+  card.append(heading);
+  if (top.recommended_effort) {
+    card.append(createElement(
+      "p",
+      "recommendation-effort",
+      t("recommend.effort", "Effort: {effort}", {
+        effort: translatedValue("effort", top.recommended_effort),
+      }),
+    ));
+  } else if (top.variant_effort) {
+    card.append(createElement(
+      "p",
+      "recommendation-effort",
+      t("recommend.variant", "Variant: {effort}", {
+        effort: translatedValue("effort", top.variant_effort),
+      }),
+    ));
+  }
+  const reasons = createElement("ul", "recommendation-reasons");
+  for (const reason of top.reason_codes || []) {
+    reasons.append(createElement(
+      "li",
+      "",
+      t(`recommend.reason.${reason}`, reason.replaceAll("_", " ")),
+    ));
+  }
+  card.append(reasons);
+  const ranking = createElement("ol", "recommendation-ranking");
+  candidates.forEach((candidate) => {
+    const score = candidate.quality_score === null
+      ? t("recommend.unscored", "catalog order")
+      : `${Math.round(candidate.quality_score * 100)}%`;
+    ranking.append(createElement("li", "", `${candidate.display_name || candidate.model} · ${score}`));
+  });
+  card.append(ranking);
+  if (top.evidence_ids?.length) {
+    card.append(createElement(
+      "p",
+      "note",
+      t("recommend.evidence", "Evidence: {ids}", { ids: top.evidence_ids.join(", ") }),
+    ));
+  }
+  const launchCommand = top.launch_commands?.[state.guideShell];
+  if (launchCommand) {
+    card.append(renderCommand({ id: "agy", command: launchCommand }, { compact: true }));
+  }
+  return card;
+}
+
+function renderRecommendations(context) {
+  const controls = recommendationElements(context);
+  const recommendations = state.recommendations[context];
+  if (!recommendations) {
+    controls.results.replaceChildren(createElement(
+      "p",
+      "note",
+      t("recommend.prompt", "Choose a complexity to see quality-first suggestions."),
+    ));
+    return;
+  }
+  const cards = createElement("div", "recommendation-grid");
+  cards.append(
+    recommendationCard("codex", recommendations.codex || []),
+    recommendationCard("agy", recommendations.agy || []),
+  );
+  const apply = createElement(
+    "button",
+    "button primary apply-recommendation",
+    t("action.applyRecommendation", "Apply recommendation"),
+  );
+  apply.type = "button";
+  apply.disabled = !(recommendations.codex?.length || recommendations.agy?.length);
+  apply.addEventListener("click", () => applyRecommendation(context));
+  controls.results.replaceChildren(cards, apply);
+}
+
+function applyRecommendation(context) {
+  const controls = recommendationElements(context);
+  const recommendations = state.recommendations[context];
+  if (!recommendations) {
+    return;
+  }
+  const codex = recommendations.codex?.[0];
+  const agy = recommendations.agy?.[0];
+  if (codex) {
+    controls.codexModel.value = codex.model;
+    controls.codexEffort.value = codex.recommended_effort || "";
+    addModelOption("codex", codex.model);
+  }
+  if (agy) {
+    controls.hostModel.value = agy.model;
+    addModelOption("host", agy.model);
+  }
+  showToast(t("toast.recommendationApplied", "Recommendation applied to the form."));
 }
 
 function renderDeletePreview() {
@@ -1605,10 +2123,63 @@ elements.workspaceSelect.addEventListener("change", () => {
   state.mobileRunListExpanded = false;
   state.detail = null;
   loadRuns({ reset: true }).catch(handleError);
+  if (!elements.guideDrawer.hidden) {
+    loadGuide().catch(handleError);
+  }
 });
 
 elements.languageSelect.addEventListener("change", () => {
   applyLocale(elements.languageSelect.value, { persist: true, announce: true });
+});
+
+elements.guideButton.addEventListener("click", () => {
+  openGuide(elements.guideButton).catch(handleError);
+});
+
+elements.emptyGuideButton.addEventListener("click", () => {
+  openGuide(elements.emptyGuideButton).catch(handleError);
+});
+
+elements.emptyStartButton.addEventListener("click", () => {
+  openStartRunDialog().catch(handleError);
+});
+
+elements.closeGuide.addEventListener("click", closeGuide);
+elements.guideOverlay.addEventListener("click", closeGuide);
+
+for (const tab of [elements.shellPosix, elements.shellPowershell]) {
+  tab.addEventListener("click", () => {
+    state.guideShell = tab.dataset.shell;
+    renderGuide();
+    renderRecommendations("start");
+    renderRecommendations("settings");
+  });
+}
+
+elements.refreshModelsButton.addEventListener("click", () => {
+  refreshModelOptions().catch((error) => {
+    handleError(error);
+    showToast(t(
+      "toast.modelsRefreshFailed",
+      "Could not refresh models. Existing choices and manual input remain available.",
+    ));
+  });
+});
+
+elements.sourceFilter.addEventListener("change", renderModelSources);
+
+elements.guideCopyAll.addEventListener("click", async () => {
+  const sections = state.guide?.shells?.[state.guideShell] || [];
+  const commands = sections.flatMap((section) => section.commands).map((item) => item.command);
+  if (!commands.length) {
+    return;
+  }
+  try {
+    await copyText(commands.join("\n"));
+    showToast(t("toast.copied", "Copied to clipboard."));
+  } catch (_error) {
+    showToast(t("toast.copyFailed", "Could not copy. Select the command manually."));
+  }
 });
 
 elements.runListToggle.addEventListener("click", () => {
@@ -1640,9 +2211,23 @@ elements.closeStartRun.addEventListener("click", () => elements.startRunDialog.c
 elements.startWorkspace.addEventListener("change", async () => {
   try {
     populateStartSettings((await workspaceSettings(elements.startWorkspace.value)).settings);
+    state.recommendations.start = null;
+    renderRecommendations("start");
   } catch (error) {
     handleError(error);
   }
+});
+
+elements.startRecommendButton.addEventListener("click", () => {
+  loadRecommendations("start").catch((error) => {
+    handleError(error);
+    showToast(t("toast.recommendationFailed", "Could not load model recommendations."));
+  });
+});
+
+elements.startComplexity.addEventListener("change", () => {
+  state.recommendations.start = null;
+  renderRecommendations("start");
 });
 
 elements.startRunForm.addEventListener("submit", async (event) => {
@@ -1677,9 +2262,23 @@ elements.closeSettings.addEventListener("click", () => elements.settingsDialog.c
 elements.settingsWorkspace.addEventListener("change", async () => {
   try {
     populateSettingsForm(await workspaceSettings(elements.settingsWorkspace.value));
+    state.recommendations.settings = null;
+    renderRecommendations("settings");
   } catch (error) {
     handleError(error);
   }
+});
+
+elements.settingsRecommendButton.addEventListener("click", () => {
+  loadRecommendations("settings").catch((error) => {
+    handleError(error);
+    showToast(t("toast.recommendationFailed", "Could not load model recommendations."));
+  });
+});
+
+elements.settingsComplexity.addEventListener("change", () => {
+  state.recommendations.settings = null;
+  renderRecommendations("settings");
 });
 
 elements.settingsForm.addEventListener("submit", async (event) => {
@@ -1865,6 +2464,15 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     refreshAll({ silent: true });
   }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (!elements.guideDrawer.hidden && event.key === "Escape") {
+    event.preventDefault();
+    closeGuide();
+    return;
+  }
+  trapGuideFocus(event);
 });
 
 MOBILE_BREAKPOINT.addEventListener("change", () => {

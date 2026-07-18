@@ -10,7 +10,15 @@ import pytest
 
 from agentbraid.config import AgentBraidConfig
 from agentbraid.errors import ProviderOutputError, ProviderUnavailableError
-from agentbraid.models import RunPlan, RunReview, StartRunRequest, TaskKind, TaskSpec, WorkerResult
+from agentbraid.models import (
+    CodexReasoningEffort,
+    RunPlan,
+    RunReview,
+    StartRunRequest,
+    TaskKind,
+    TaskSpec,
+    WorkerResult,
+)
 from agentbraid.providers.codex import (
     CodexAdapter,
     _classify_failure,
@@ -78,6 +86,7 @@ def config(tmp_path: Path, *, max_output_bytes: int = 100_000) -> AgentBraidConf
         worktree_dir=tmp_path / "state" / "worktrees",
         codex_binary="codex",
         codex_model="gpt-test",
+        codex_reasoning_effort=CodexReasoningEffort.HIGH,
         codex_timeout_seconds=5,
         max_output_bytes=max_output_bytes,
     )
@@ -228,6 +237,11 @@ async def test_plan_invokes_structured_read_only_codex(
     assert result.usage.cached_input_tokens == 40
     assert invocation["args"][:3] == ("codex", "exec", "--json")
     assert "read-only" in invocation["args"]
+    config_index = invocation["args"].index("--config")
+    assert invocation["args"][config_index : config_index + 2] == (
+        "--config",
+        'model_reasoning_effort="high"',
+    )
     assert invocation["kwargs"]["cwd"] == tmp_path
     assert invocation["kwargs"]["env"]["AGENTBRAID_CHILD"] == "1"
     assert "GOOGLE_API_KEY" not in invocation["kwargs"]["env"]

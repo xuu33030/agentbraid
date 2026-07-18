@@ -36,6 +36,7 @@ from agentbraid.errors import (
     StateError,
     WorktreeError,
 )
+from agentbraid.model_intelligence import ModelIntelligence
 from agentbraid.models import (
     ApplyReadiness,
     Executor,
@@ -48,6 +49,7 @@ from agentbraid.models import (
     RunStatus,
     StartRunRequest,
     StrictModel,
+    WorkloadComplexity,
     WorkspaceSettings,
     WorkspaceSummary,
     utc_now,
@@ -83,6 +85,7 @@ _RequestModel = TypeVar("_RequestModel", bound=StrictModel)
 _ENVIRONMENT_SETTING_FIELDS = {
     "AGENTBRAID_CODEX_BINARY": "codex_binary",
     "AGENTBRAID_CODEX_MODEL": "codex_model",
+    "AGENTBRAID_CODEX_REASONING_EFFORT": "codex_reasoning_effort",
     "AGENTBRAID_WORKTREE_DIR": "worktree_dir",
     "AGENTBRAID_CODEX_TIMEOUT_SECONDS": "codex_timeout_seconds",
     "AGENTBRAID_MAX_PARALLEL_CODEX": "max_parallel_codex",
@@ -114,6 +117,11 @@ class _DeleteRunsRequest(_DeletePreviewRequest):
 
 class _WorkspaceSettingsRequest(StrictModel):
     settings: WorkspaceSettings
+
+
+class _ModelRefreshRequest(StrictModel):
+    workspace: str
+    include_external: bool = False
 
 
 @dataclass(slots=True)
@@ -185,6 +193,7 @@ class DashboardController:
         store: StateStore,
         *,
         initial_workspace: Path | None,
+        model_intelligence: ModelIntelligence | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -194,6 +203,7 @@ class DashboardController:
         self._background_runs: dict[str, tuple[AgentBraidService, asyncio.Task[None]]] = {}
         self._restart_required_workspaces: set[str] = set()
         self._active_runtime: dict[str, tuple[str, Path]] = {}
+        self.model_intelligence = model_intelligence or ModelIntelligence(config.state_dir)
 
     def metadata(self) -> dict[str, object]:
         return {
@@ -201,7 +211,7 @@ class DashboardController:
             "initial_workspace": self.initial_workspace,
             "database_scope": "active_state_database",
             "can_start_runs": True,
-            "schema_version": 4,
+            "schema_version": 5,
         }
 
     def list_workspaces(self) -> list[dict[str, object]]:
@@ -228,12 +238,71 @@ class DashboardController:
         return [item.model_dump(mode="json") for item in self.store.list_capabilities()]
 
     def model_options(self) -> dict[str, object]:
-        return {
-            "codex": self.store.list_observed_models(Executor.CODEX),
-            "host": self.store.list_observed_models(Executor.HOST),
-            "codex_catalog_available": False,
-            "host_controlled_by_dashboard": False,
-        }
+        return self.model_intelligence.catalog_options(
+            self.store.list_observed_models(Executor.CODEX),
+            self.store.list_observed_models(Executor.HOST),
+        )
+
+    def refresh_model_options(
+        self,
+        workspace: str,
+        *,
+        include_external: bool,
+    ) -> dict[str, object]:
+        path = self._workspace_path(workspace)
+        base = self._base_config(path)
+        saved = self.store.get_workspace_settings(str(path))
+        runtime = base.with_workspace_runtime(saved) if saved is not None else base
+        external_update: dict[str, object] = {"requested": include_external, "status": "skipped"}
+        if include_external:
+            try:
+                manifest = self.model_intelligence.refresh_external_manifest()
+                external_update = {
+                    "requested": True,
+                    "status": "updated",
+                    "manifest_version": manifest.manifest_version,
+                }
+            except StateError as exc:
+                external_update = {
+                    "requested": True,
+                    "status": "failed",
+                    "detail": exc.message,
+                }
+        options = self.model_intelligence.refresh_catalogs(
+            path,
+            codex_binary=runtime.codex_binary,
+            observed_codex=self.store.list_observed_models(Executor.CODEX),
+            observed_host=self.store.list_observed_models(Executor.HOST),
+        )
+        options["external_update"] = external_update
+        return options
+
+    def model_recommendations(
+        self,
+        workspace: str,
+        complexity: WorkloadComplexity,
+    ) -> dict[str, object]:
+        self._workspace_path(workspace)
+        return self.model_intelligence.recommend(
+            complexity,
+            {
+                Executor.CODEX: self.store.list_model_statistics(Executor.CODEX),
+                Executor.HOST: self.store.list_model_statistics(Executor.HOST),
+            },
+            self.store.list_observed_models(Executor.CODEX),
+            self.store.list_observed_models(Executor.HOST),
+        )
+
+    def guide(self, workspace: str, agy_model: str | None = None) -> dict[str, object]:
+        path = self._workspace_path(workspace)
+        config = self._base_config(path)
+        settings = self.store.get_workspace_settings(
+            str(path)
+        ) or config.default_workspace_settings(path)
+        selected_model = agy_model.strip() if agy_model is not None else settings.host_model
+        if not selected_model:
+            selected_model = settings.host_model
+        return self.model_intelligence.guide(path, selected_model)
 
     def get_settings(self, workspace: str) -> dict[str, object]:
         path = self._workspace_path(workspace)
@@ -632,6 +701,38 @@ def create_dashboard_app(
         _require_session(request, security)
         return JSONResponse(controller.model_options())
 
+    async def refresh_model_options(request: Request) -> Response:
+        _require_session(request, security)
+        security.authorize_mutation(request)
+        body = await _validated_body(request, _ModelRefreshRequest)
+        payload = await asyncio.to_thread(
+            controller.refresh_model_options,
+            body.workspace,
+            include_external=body.include_external,
+        )
+        return JSONResponse(payload)
+
+    async def model_recommendations(request: Request) -> Response:
+        _require_session(request, security)
+        workspace = request.query_params.get("workspace", "")
+        complexity_value = request.query_params.get("complexity", "")
+        if not workspace or not complexity_value:
+            raise StateError("model recommendations require workspace and complexity")
+        try:
+            complexity = WorkloadComplexity(complexity_value)
+        except ValueError as exc:
+            raise StateError("model recommendation complexity is invalid") from exc
+        return JSONResponse(controller.model_recommendations(workspace, complexity))
+
+    async def guide(request: Request) -> Response:
+        _require_session(request, security)
+        workspace = request.query_params.get("workspace", "")
+        if not workspace:
+            raise StateError("guide request requires a workspace")
+        return JSONResponse(
+            controller.guide(workspace, request.query_params.get("agy_model") or None)
+        )
+
     async def settings(request: Request) -> Response:
         _require_session(request, security)
         workspace = request.query_params.get("workspace", "")
@@ -701,6 +802,9 @@ def create_dashboard_app(
         Route("/api/v1/runs", start_run, methods=["POST"]),
         Route("/api/v1/capabilities", capabilities, methods=["GET"]),
         Route("/api/v1/model-options", model_options, methods=["GET"]),
+        Route("/api/v1/model-options/refresh", refresh_model_options, methods=["POST"]),
+        Route("/api/v1/model-recommendations", model_recommendations, methods=["GET"]),
+        Route("/api/v1/guide", guide, methods=["GET"]),
         Route("/api/v1/settings", settings, methods=["GET"]),
         Route("/api/v1/settings", save_settings, methods=["PUT"]),
         Route("/api/v1/runs/delete-preview", delete_preview, methods=["POST"]),
@@ -785,7 +889,7 @@ async def _agentbraid_error_handler(request: Request, exc: Exception) -> JSONRes
         status_code = 404
     elif isinstance(exc, SecurityBoundaryError):
         status_code = 403
-    elif isinstance(exc, (StateError, WorktreeError)):
+    elif isinstance(exc, StateError | WorktreeError):
         status_code = 409
     else:
         status_code = 400
@@ -834,6 +938,7 @@ def _apply_environment_locks(
     config_values: dict[str, object] = {
         "codex_binary": config.codex_binary,
         "codex_model": config.codex_model,
+        "codex_reasoning_effort": config.codex_reasoning_effort,
         "worktree_dir": str(config.worktree_dir.expanduser().resolve()),
         "codex_timeout_seconds": defaults.codex_timeout_seconds,
         "max_parallel_codex": defaults.max_parallel_codex,

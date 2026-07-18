@@ -248,6 +248,13 @@ class CodexAdapter:
             command.extend(["resume", "--json"])
         if self.config.codex_model is not None:
             command.extend(["--model", self.config.codex_model])
+        if self.config.codex_reasoning_effort is not None:
+            command.extend(
+                [
+                    "--config",
+                    f'model_reasoning_effort="{self.config.codex_reasoning_effort.value}"',
+                ]
+            )
         command.extend(
             [
                 "--output-schema",

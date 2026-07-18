@@ -14,7 +14,9 @@ silently delivering changes outside the reviewed local workflow.
 - Codex authentication therefore uses the user's existing `codex login` session. Raw API
   keys are not forwarded by AgentBraid.
 - Every child receives `AGENTBRAID_CHILD=1`; a nested AgentBraid server or run fails closed.
-- AgentBraid never launches `agy` and never reads Antigravity or Google credential storage.
+- AgentBraid never launches the AGY TUI and never reads Antigravity or Google credential storage.
+  A user-triggered Dashboard refresh may execute only the fixed argument vector `agy models`, with
+  a 10-second timeout, bounded output, no prompt, and no shell.
 
 ## Filesystem and Git
 
@@ -54,8 +56,12 @@ goals, repositories, task results, or bug reports.
   durable status and terminate their Codex subprocess when another local AgentBraid process
   cancels the run.
 - The Dashboard may start the same workspace-scoped service lifecycle and launch only the official
-  Codex CLI. It cannot claim or execute host tasks, launch or control Antigravity, read provider
-  credentials, push, or deploy. The AGY model field is routing metadata, not a provider control.
+  Codex execution adapter. It cannot claim or execute host tasks, launch the AGY TUI, alter AGY
+  settings, read provider credentials, push, or deploy. The AGY model field changes routing metadata
+  and a safely quoted launch command, not an already open provider session.
+- Model catalog refresh uses fixed Codex and AGY argument vectors with no shell. External scoring
+  updates are opt-in, use one fixed HTTPS GitHub path, enforce a 1 MiB limit and source allowlist,
+  and never transmit workspace, goal, usage, or token data.
 - Run deletion requires an exact confirmation and revalidates every managed artifact. Active runs,
   dirty worktrees, unmerged integration branches, unique task patches, moved workspaces, and
   unverifiable paths preserve both local artifacts and the corresponding database record.

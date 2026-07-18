@@ -9,7 +9,7 @@ from typing import Any
 from platformdirs import user_state_path
 
 from agentbraid.errors import ConfigurationError
-from agentbraid.models import WorkspaceSettings
+from agentbraid.models import CodexReasoningEffort, WorkspaceSettings
 from agentbraid.security import is_codex_binary
 
 
@@ -30,6 +30,7 @@ class AgentBraidConfig:
     worktree_dir: Path
     codex_binary: str = "codex"
     codex_model: str | None = None
+    codex_reasoning_effort: CodexReasoningEffort | None = None
     codex_timeout_seconds: int = 1800
     max_parallel_codex: int = 1
     max_output_bytes: int = 10 * 1024 * 1024
@@ -57,6 +58,7 @@ class AgentBraidConfig:
             "AGENTBRAID_WORKTREE_DIR": "worktree_dir",
             "AGENTBRAID_CODEX_BINARY": "codex_binary",
             "AGENTBRAID_CODEX_MODEL": "codex_model",
+            "AGENTBRAID_CODEX_REASONING_EFFORT": "codex_reasoning_effort",
             "AGENTBRAID_CODEX_TIMEOUT_SECONDS": "codex_timeout_seconds",
             "AGENTBRAID_MAX_PARALLEL_CODEX": "max_parallel_codex",
             "AGENTBRAID_MAX_OUTPUT_BYTES": "max_output_bytes",
@@ -73,6 +75,7 @@ class AgentBraidConfig:
             "worktree_dir",
             "codex_binary",
             "codex_model",
+            "codex_reasoning_effort",
             "codex_timeout_seconds",
             "max_parallel_codex",
             "max_output_bytes",
@@ -95,6 +98,18 @@ class AgentBraidConfig:
                 normalized[name] = _positive_int(value, name)
             elif name == "codex_model":
                 normalized[name] = str(value).strip() or None
+            elif name == "codex_reasoning_effort":
+                candidate = str(value).strip()
+                if not candidate:
+                    normalized[name] = None
+                else:
+                    try:
+                        normalized[name] = CodexReasoningEffort(candidate)
+                    except ValueError as exc:
+                        allowed = ", ".join(item.value for item in CodexReasoningEffort)
+                        raise ConfigurationError(
+                            f"codex_reasoning_effort must be one of: {allowed}"
+                        ) from exc
             elif name == "codex_binary":
                 binary = str(value).strip()
                 if not is_codex_binary(binary):
@@ -114,6 +129,7 @@ class AgentBraidConfig:
             workspace=str(workspace.expanduser().resolve()),
             codex_binary=self.codex_binary,
             codex_model=self.codex_model,
+            codex_reasoning_effort=self.codex_reasoning_effort,
             max_parallel_codex=min(self.max_parallel_codex, 8),
             max_task_attempts=min(self.max_task_attempts, 3),
             codex_timeout_seconds=min(max(self.codex_timeout_seconds, 60), 7200),

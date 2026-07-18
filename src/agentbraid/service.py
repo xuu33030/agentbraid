@@ -23,6 +23,7 @@ from agentbraid.models import (
     ApplyRunResult,
     CapabilitySnapshot,
     CapabilityStatus,
+    CodexReasoningEffort,
     DeliveryMode,
     Executor,
     HostTaskResult,
@@ -153,6 +154,7 @@ class AgentBraidService:
                     "delivery_mode": settings.delivery_mode,
                     "execution": RunExecutionOverrides(
                         codex_model=settings.codex_model,
+                        codex_reasoning_effort=settings.codex_reasoning_effort,
                         host_model=settings.host_model,
                         routing_mode=settings.routing_mode,
                         delivery_mode=settings.delivery_mode,
@@ -203,6 +205,7 @@ class AgentBraidService:
                     "planning",
                     model,
                     planning,
+                    reasoning_effort=settings.codex_reasoning_effort,
                     outcome=ProviderInvocationOutcome.SUCCEEDED,
                 ),
             )
@@ -577,6 +580,7 @@ class AgentBraidService:
         model: str,
     ) -> None:
         run = self.store.get_run(run_id)
+        settings = self._settings_for_run(run)
         worktrees = self._worktrees_for_run(run)
         codex = self._codex_for_run(run)
         integration_branch = _integration_branch(run)
@@ -608,6 +612,7 @@ class AgentBraidService:
                     "task",
                     model,
                     invocation,
+                    reasoning_effort=settings.codex_reasoning_effort,
                     task_id=task.spec.task_id,
                     attempt=task.attempt,
                     outcome=ProviderInvocationOutcome(result.outcome.value),
@@ -706,7 +711,8 @@ class AgentBraidService:
             if run.status == RunStatus.INTEGRATING:
                 self.store.set_run_status(run_id, RunStatus.REVIEWING)
             reviewing = self.store.get_run(run_id)
-            model = self._settings_for_run(run).codex_model or "codex-default"
+            settings = self._settings_for_run(run)
+            model = settings.codex_model or "codex-default"
             try:
                 invocation = await self._await_invocation(
                     run_id,
@@ -742,6 +748,7 @@ class AgentBraidService:
                     "review",
                     model,
                     invocation,
+                    reasoning_effort=settings.codex_reasoning_effort,
                     outcome=(
                         ProviderInvocationOutcome.APPROVED
                         if review.approved
@@ -808,6 +815,12 @@ class AgentBraidService:
         if "AGENTBRAID_CODEX_MODEL" in os.environ:
             codex_model = self.config.codex_model
 
+        codex_reasoning_effort = overrides.codex_reasoning_effort if overrides is not None else None
+        if codex_reasoning_effort is None:
+            codex_reasoning_effort = saved.codex_reasoning_effort
+        if "AGENTBRAID_CODEX_REASONING_EFFORT" in os.environ:
+            codex_reasoning_effort = self.config.codex_reasoning_effort
+
         host_model = saved.host_model
         if request.host_model != "antigravity-auto":
             host_model = request.host_model
@@ -823,6 +836,7 @@ class AgentBraidService:
         settings = RunExecutionSettings(
             codex_binary=self.config.codex_binary,
             codex_model=codex_model,
+            codex_reasoning_effort=codex_reasoning_effort,
             host_model=host_model,
             routing_mode=(
                 overrides.routing_mode
@@ -872,6 +886,7 @@ class AgentBraidService:
             self.config,
             codex_binary=settings.codex_binary,
             codex_model=settings.codex_model,
+            codex_reasoning_effort=settings.codex_reasoning_effort,
             codex_timeout_seconds=settings.codex_timeout_seconds,
             max_parallel_codex=settings.max_parallel_codex,
             max_output_bytes=settings.max_output_bytes,
@@ -910,6 +925,7 @@ def _provider_usage_record(
     model: str,
     invocation: StructuredProviderResult[Any],
     *,
+    reasoning_effort: CodexReasoningEffort | None = None,
     task_id: str | None = None,
     attempt: int | None = None,
     outcome: ProviderInvocationOutcome | None = None,
@@ -918,6 +934,7 @@ def _provider_usage_record(
         phase=phase,
         executor=Executor.CODEX,
         model=model,
+        reasoning_effort=reasoning_effort,
         task_id=task_id,
         attempt=attempt,
         outcome=outcome,

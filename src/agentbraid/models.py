@@ -99,6 +99,22 @@ class DashboardLocale(StrEnum):
     ZH_CN = "zh-CN"
 
 
+class CodexReasoningEffort(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+    ULTRA = "ultra"
+
+
+class WorkloadComplexity(StrEnum):
+    QUICK = "quick"
+    STANDARD = "standard"
+    COMPLEX = "complex"
+    HIGH_RISK = "high_risk"
+
+
 class LocalizedRunNames(StrictModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
 
@@ -109,6 +125,7 @@ class LocalizedRunNames(StrictModel):
 
 class RunExecutionOverrides(StrictModel):
     codex_model: str | None = Field(default=None, min_length=1, max_length=200)
+    codex_reasoning_effort: CodexReasoningEffort | None = None
     host_model: str | None = Field(default=None, min_length=1, max_length=200)
     routing_mode: RoutingMode | None = None
     delivery_mode: DeliveryMode | None = None
@@ -126,6 +143,7 @@ class RunExecutionOverrides(StrictModel):
 class RunExecutionSettings(StrictModel):
     codex_binary: str = Field(min_length=1, max_length=1000)
     codex_model: str | None = Field(default=None, min_length=1, max_length=200)
+    codex_reasoning_effort: CodexReasoningEffort | None = None
     host_model: str = Field(default="antigravity-auto", min_length=1, max_length=200)
     routing_mode: RoutingMode = RoutingMode.HYBRID
     delivery_mode: DeliveryMode = DeliveryMode.INTEGRATION_BRANCH
@@ -273,6 +291,7 @@ class ProviderUsageRecord(StrictModel):
     phase: str = Field(min_length=1, max_length=50)
     executor: Executor
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: CodexReasoningEffort | None = None
     task_id: TaskId | None = None
     attempt: int | None = Field(default=None, ge=1)
     outcome: ProviderInvocationOutcome | None = None

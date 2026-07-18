@@ -8,7 +8,7 @@ from agentbraid.cli import main
 
 
 def test_version_is_alpha() -> None:
-    assert __version__ == "0.2.0a2"
+    assert __version__ == "0.2.0a3"
 
 
 def test_doctor_json_reports_checks(capsys: object, tmp_path: Path) -> None:

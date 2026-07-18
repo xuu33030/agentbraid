@@ -40,6 +40,9 @@
           <option value="en">English</option>
         </select>
       </label>
+      <button id="guide-button" class="button secondary" type="button" data-i18n="action.guide">
+        Guide
+      </button>
       <button id="refresh-button" class="button secondary" type="button" data-i18n="action.refresh">
         Refresh
       </button>
@@ -113,6 +116,17 @@
         <p data-i18n="empty.description">
           Inspect task dependencies, execution events, token allocation, and delivery safety.
         </p>
+        <article class="quick-start-card">
+          <p class="eyebrow" data-i18n="guide.quickEyebrow">QUICK START</p>
+          <h3 data-i18n="guide.quickTitle">Prepare this workspace</h3>
+          <p data-i18n="guide.quickDescription">
+            Follow safe, copyable commands or start a run with recommended models.
+          </p>
+          <div class="quick-start-actions">
+            <button id="empty-guide-button" class="button secondary" type="button" data-i18n="action.openGuide">Open guide</button>
+            <button id="empty-start-button" class="button primary" type="button" data-i18n="action.startRun">Start run</button>
+          </div>
+        </article>
       </div>
 
       <div id="run-detail" hidden>
@@ -236,6 +250,7 @@
                 <tr>
                   <th data-i18n="table.phaseTask">Phase / task</th>
                   <th data-i18n="table.model">Model</th>
+                  <th data-i18n="table.effort">Effort</th>
                   <th data-i18n="table.attempt">Attempt</th>
                   <th data-i18n="table.outcome">Outcome</th>
                   <th data-i18n="table.input">Input</th>
@@ -276,6 +291,67 @@
       </div>
     </section>
   </main>
+
+  <div id="guide-overlay" class="drawer-overlay" hidden></div>
+  <aside
+    id="guide-drawer"
+    class="guide-drawer"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="guide-title"
+    tabindex="-1"
+    hidden
+  >
+    <header class="guide-header">
+      <div>
+        <p class="eyebrow" data-i18n="guide.eyebrow">LOCAL WORKFLOW</p>
+        <h2 id="guide-title" data-i18n="guide.title">AgentBraid usage guide</h2>
+      </div>
+      <button id="close-guide" class="button secondary" type="button" data-i18n="action.close">Close</button>
+    </header>
+    <p class="note" data-i18n="guide.safetyNote">
+      Commands are copied only. The Dashboard never opens or controls your operating-system terminal.
+    </p>
+    <div class="shell-tabs" role="tablist" aria-label="Shell" data-i18n-aria-label="guide.shellTabsAria">
+      <button id="shell-posix" class="shell-tab active" type="button" role="tab" aria-selected="true" data-shell="posix">macOS / Linux</button>
+      <button id="shell-powershell" class="shell-tab" type="button" role="tab" aria-selected="false" data-shell="powershell">Windows PowerShell</button>
+    </div>
+    <button id="guide-copy-all" class="button secondary guide-copy-all" type="button" data-i18n="action.copyAll">Copy all</button>
+    <div id="guide-command-sections" class="guide-command-sections"></div>
+    <section class="guide-section">
+      <div class="guide-section-heading">
+        <div>
+          <p class="eyebrow" data-i18n="guide.agyEyebrow">INSIDE AGY</p>
+          <h3 data-i18n="guide.agyTitle">AGY TUI commands</h3>
+        </div>
+      </div>
+      <div id="guide-agy-commands" class="command-list compact"></div>
+    </section>
+    <section class="guide-section">
+      <div class="guide-section-heading">
+        <div>
+          <p class="eyebrow" data-i18n="guide.modelsEyebrow">MODEL CATALOGS</p>
+          <h3 data-i18n="guide.modelsTitle">Refresh model choices</h3>
+        </div>
+      </div>
+      <p class="note" data-i18n="guide.modelsDescription">
+        Runs only codex debug models and agy models. External scores update only when opted in.
+      </p>
+      <label class="checkbox-field"><input id="include-external-scores" type="checkbox"> <span data-i18n="guide.externalOptIn">Update external scoring manifest</span></label>
+      <button id="refresh-models-button" class="button secondary" type="button" data-i18n="action.refreshModels">Refresh models</button>
+      <div id="catalog-status" class="catalog-status" aria-live="polite"></div>
+    </section>
+    <section class="guide-section">
+      <div class="guide-section-heading">
+        <div>
+          <p class="eyebrow" data-i18n="guide.sourcesEyebrow">SCORING SOURCES</p>
+          <h3 data-i18n="guide.sourcesTitle">Evidence and update details</h3>
+        </div>
+      </div>
+      <label class="source-filter"><span data-i18n="sources.filter">Filter source</span><select id="source-filter"><option value="" data-i18n="sources.all">All sources</option></select></label>
+      <div id="model-source-list" class="source-list"></div>
+    </section>
+  </aside>
 
   <dialog id="cancel-dialog">
     <form method="dialog" class="dialog-content">
@@ -327,7 +403,8 @@
       <label class="full-span"><span data-i18n="form.goal">Goal</span><textarea id="start-goal" rows="5" maxlength="50000" required placeholder="Inspect README.md in this repository and report the project name and purpose." data-i18n-placeholder="form.goalPlaceholder"></textarea></label>
       <label class="full-span"><span data-i18n="form.constraints">Constraints (one per line)</span><textarea id="start-constraints" rows="3" placeholder="Keep it read-only&#10;Do not edit files" data-i18n-placeholder="form.constraintsPlaceholder"></textarea></label>
       <label><span data-i18n="form.codexModel">Codex model</span><input id="start-codex-model" list="codex-model-options" placeholder="CLI default" data-i18n-placeholder="form.codexDefault"></label>
-      <label><span data-i18n="form.hostModel">AGY model label</span><input id="start-host-model" list="host-model-options" value="antigravity-auto"></label>
+      <label><span data-i18n="form.codexEffort">Codex reasoning effort</span><select id="start-codex-effort"><option value="">CLI default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option><option value="ultra">Ultra</option></select></label>
+      <label><span data-i18n="form.hostModel">AGY model / routing label</span><input id="start-host-model" list="host-model-options" value="antigravity-auto"></label>
       <label><span data-i18n="form.routingMode">Routing</span><select id="start-routing"><option value="hybrid">Hybrid</option><option value="codex_only">Codex-only</option></select></label>
       <label><span data-i18n="form.deliveryMode">Delivery</span><select id="start-delivery"><option value="integration_branch">Integration branch</option><option value="report_only">Report only</option></select></label>
       <label><span data-i18n="form.workspaceMode">Workspace access</span><select id="start-workspace-mode"><option value="worktree_write">Isolated worktree writes</option><option value="read_only">Read-only</option></select></label>
@@ -335,8 +412,15 @@
       <label><span data-i18n="form.attempts">Task attempts</span><input id="start-attempts" type="number" min="1" max="3" value="2"></label>
       <label><span data-i18n="form.timeout">Timeout seconds</span><input id="start-timeout" type="number" min="60" max="7200" value="1800"></label>
       <label><span data-i18n="form.outputBytes">Max output bytes</span><input id="start-output-bytes" type="number" min="1048576" max="104857600" value="10485760"></label>
+      <section class="recommendation-builder full-span">
+        <div class="recommendation-controls">
+          <label><span data-i18n="recommend.complexity">Task complexity</span><select id="start-complexity"><option value="quick">Quick</option><option value="standard" selected>Standard</option><option value="complex">Complex</option><option value="high_risk">High risk</option></select></label>
+          <button id="start-recommend-button" class="button secondary" type="button" data-i18n="action.recommendModels">Recommend models</button>
+        </div>
+        <div id="start-recommendations" class="recommendation-results" aria-live="polite"></div>
+      </section>
       <label class="checkbox-field full-span"><input id="start-save-defaults" type="checkbox"> <span data-i18n="form.saveDefaults">Save as workspace defaults</span></label>
-      <p class="note full-span" data-i18n="form.hostBoundary">AGY model is informational; choose the actual model in AGY.</p>
+      <p class="note full-span" data-i18n="form.hostBoundary">The AGY selection updates this run snapshot and launch command only; it cannot change an open AGY session.</p>
       <div class="dialog-actions full-span"><button id="close-start-run" class="button secondary" type="button" data-i18n="action.close">Close</button><button class="button primary" type="submit" data-i18n="action.startRun">Start run</button></div>
     </form>
   </dialog>
@@ -347,7 +431,8 @@
       <h2 data-i18n="dialog.settingsTitle">Workspace settings</h2>
       <label class="full-span"><span data-i18n="control.workspace">Workspace</span><select id="settings-workspace" required></select></label>
       <label><span data-i18n="form.codexModel">Codex model</span><input id="settings-codex-model" list="codex-model-options"></label>
-      <label><span data-i18n="form.hostModel">AGY model label</span><input id="settings-host-model" list="host-model-options"></label>
+      <label><span data-i18n="form.codexEffort">Codex reasoning effort</span><select id="settings-codex-effort"><option value="">CLI default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option><option value="ultra">Ultra</option></select></label>
+      <label><span data-i18n="form.hostModel">AGY model / routing label</span><input id="settings-host-model" list="host-model-options"></label>
       <label><span data-i18n="form.routingMode">Routing</span><select id="settings-routing"><option value="hybrid">Hybrid</option><option value="codex_only">Codex-only</option></select></label>
       <label><span data-i18n="form.deliveryMode">Delivery</span><select id="settings-delivery"><option value="integration_branch">Integration branch</option><option value="report_only">Report only</option></select></label>
       <label><span data-i18n="form.workspaceMode">Workspace access</span><select id="settings-workspace-mode"><option value="worktree_write">Isolated worktree writes</option><option value="read_only">Read-only</option></select></label>
@@ -359,7 +444,14 @@
       <label class="full-span"><span data-i18n="form.worktreeDir">Worktree directory (restart required)</span><input id="settings-worktree-dir"></label>
       <label><span data-i18n="form.databasePath">Database path (read-only)</span><input id="settings-database-path" readonly></label>
       <label><span data-i18n="form.stateDir">State directory (read-only)</span><input id="settings-state-dir" readonly></label>
-      <p class="note full-span" data-i18n="form.hostBoundary">AGY model is informational; choose the actual model in AGY.</p>
+      <section class="recommendation-builder full-span">
+        <div class="recommendation-controls">
+          <label><span data-i18n="recommend.complexity">Task complexity</span><select id="settings-complexity"><option value="quick">Quick</option><option value="standard" selected>Standard</option><option value="complex">Complex</option><option value="high_risk">High risk</option></select></label>
+          <button id="settings-recommend-button" class="button secondary" type="button" data-i18n="action.recommendModels">Recommend models</button>
+        </div>
+        <div id="settings-recommendations" class="recommendation-results" aria-live="polite"></div>
+      </section>
+      <p class="note full-span" data-i18n="form.hostBoundary">The AGY selection updates defaults and launch commands only; it cannot change an open AGY session.</p>
       <p id="settings-restart-note" class="message full-span" hidden data-i18n="form.restartRequired">Restart Dashboard and MCP to apply runtime changes.</p>
       <div class="dialog-actions full-span"><button id="close-settings" class="button secondary" type="button" data-i18n="action.close">Close</button><button class="button primary" type="submit" data-i18n="action.save">Save</button></div>
     </form>

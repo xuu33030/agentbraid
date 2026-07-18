@@ -24,6 +24,9 @@ provider interfaces or policies change.
 - [x] Cross-process cancellation and reviewed apply controls
 - [x] Dashboard run creation and workspace execution settings
 - [x] Localized run names and safe selected-history cleanup
+- [x] Fixed usage guide and safely quoted cross-platform commands
+- [x] User-triggered model catalogs, Codex effort, and quality-first recommendations
+- [x] Opt-in validated external scoring manifest and evidence details
 
 ## After v0.2
 
@@ -36,7 +39,7 @@ provider interfaces or policies change.
 
 ## Non-goals for v0.1
 
-- Launching Antigravity CLI as a subprocess
+- Launching the Antigravity TUI or executing prompts as a subprocess
 - Reading or forwarding provider OAuth credentials
 - Sharing one user's subscription with other users
 - Hosted multi-tenant orchestration

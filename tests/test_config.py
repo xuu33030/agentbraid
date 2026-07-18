@@ -39,11 +39,13 @@ max_task_attempts = 3
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENTBRAID_CODEX_MODEL", "gpt-environment")
+    monkeypatch.setenv("AGENTBRAID_CODEX_REASONING_EFFORT", "xhigh")
     monkeypatch.setenv("AGENTBRAID_MAX_PARALLEL_CODEX", "4")
 
     config = AgentBraidConfig.load(tmp_path)
 
     assert config.codex_model == "gpt-environment"
+    assert config.codex_reasoning_effort == "xhigh"
     assert config.max_parallel_codex == 4
     assert config.max_task_attempts == 3
 
@@ -73,4 +75,13 @@ def test_config_rejects_host_cli_as_codex_binary(
     monkeypatch.setenv("AGENTBRAID_CODEX_BINARY", "agy")
 
     with pytest.raises(ConfigurationError, match="official codex executable"):
+        AgentBraidConfig.load()
+
+
+def test_config_rejects_unknown_codex_reasoning_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTBRAID_CODEX_REASONING_EFFORT", "impossible")
+
+    with pytest.raises(ConfigurationError, match="codex_reasoning_effort must be one of"):
         AgentBraidConfig.load()
