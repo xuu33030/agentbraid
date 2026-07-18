@@ -78,9 +78,9 @@ v0.1 weights and hard availability rules are documented in `docs/routing.md`.
 ### State store
 
 SQLite records runs, tasks, dependencies, attempts, events, capabilities, worktrees, review
-findings, localized run names, immutable execution snapshots, and workspace settings. Schema v4
-retains schema v3 workspace and provider-usage attribution while adding the Dashboard execution
-metadata. Runtime state lives outside the repository by default.
+findings, localized run names, immutable execution snapshots, and workspace settings. Schema v5
+retains schema v4 Dashboard execution metadata while adding nullable Codex reasoning-effort usage
+attribution. Runtime state lives outside the repository by default.
 
 ### Local Dashboard
 
@@ -88,8 +88,9 @@ metadata. Runtime state lives outside the repository by default.
 authenticated `127.0.0.1` session. It lists runs from one active state database, derives token
 breakdowns without double-counting cached or reasoning subsets, and invokes the same service and
 worktree safety checks for run creation, cancellation, cleanup, and explicit apply. The Dashboard
-may launch the official Codex CLI with a selected model, but it cannot execute host work or launch
-Antigravity; AGY model values remain routing metadata for the authenticated MCP host.
+may launch the official Codex CLI with a selected model and reasoning effort, but it cannot execute
+host work or launch the Antigravity TUI. A user-triggered refresh may run only `agy models`; AGY
+model values remain routing metadata plus generated launch commands for the authenticated host.
 
 Each run stores its resolved execution settings so later workspace-default changes cannot alter an
 existing run's model, routing, worktree, timeout, retry, or output-limit contract. Runtime path

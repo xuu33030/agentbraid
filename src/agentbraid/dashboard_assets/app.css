@@ -944,7 +944,7 @@ dialog {
 }
 
 dialog.wide-dialog {
-  width: min(820px, calc(100% - 32px));
+  width: min(920px, calc(100% - 32px));
 }
 
 dialog::backdrop {
@@ -1079,6 +1079,295 @@ code {
   box-shadow: var(--shadow);
 }
 
+body.drawer-open {
+  overflow: hidden;
+}
+
+.quick-start-card {
+  width: min(100%, 460px);
+  margin-top: 26px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary-soft) 72%, transparent), transparent),
+    var(--surface);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.empty-state .quick-start-card p {
+  margin: 8px 0 0;
+}
+
+.quick-start-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.drawer-overlay {
+  position: fixed;
+  z-index: 39;
+  inset: 0;
+  background: rgba(10, 15, 24, 0.48);
+  backdrop-filter: blur(2px);
+}
+
+.guide-drawer {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  right: 0;
+  width: min(620px, calc(100vw - 44px));
+  height: 100dvh;
+  padding: 24px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: -24px 0 60px rgba(10, 15, 24, 0.2);
+}
+
+.guide-header,
+.guide-section-heading,
+.source-card-header,
+.recommendation-topline,
+.recommendation-controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.guide-header {
+  position: sticky;
+  z-index: 1;
+  top: -24px;
+  margin: -24px -24px 18px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.shell-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0;
+  padding: 4px;
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.shell-tab {
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.shell-tab.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 4px 12px rgba(31, 41, 55, 0.08);
+}
+
+.guide-copy-all {
+  width: 100%;
+  margin: -8px 0 14px;
+}
+
+.guide-command-sections,
+.command-list,
+.source-list,
+.recommendation-results {
+  display: grid;
+  gap: 12px;
+}
+
+.guide-section {
+  margin-top: 18px;
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.guide-command-sections > .guide-section {
+  margin-top: 0;
+}
+
+.guide-section-heading {
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.command-list.compact {
+  gap: 8px;
+}
+
+.command-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.command-row.compact {
+  padding: 8px 10px;
+}
+
+.command-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.command-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.command-code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.copy-button.compact {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.clipboard-fallback {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.catalog-status,
+.source-summary {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.source-filter {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.source-filter select {
+  width: 100%;
+}
+
+.source-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.source-link {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.source-license,
+.confidence {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.source-license.redistributable,
+.confidence.high {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.source-license.reference_only,
+.confidence.medium {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.source-entry-list,
+.recommendation-reasons,
+.recommendation-ranking {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.recommendation-builder {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.recommendation-controls {
+  align-items: end;
+  margin-bottom: 13px;
+}
+
+.recommendation-controls label {
+  flex: 1 1 auto;
+}
+
+.recommendation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recommendation-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--codex);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.recommendation-card.agy {
+  border-top-color: var(--host);
+}
+
+.recommendation-effort {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.apply-recommendation {
+  justify-self: end;
+}
+
 .empty-list {
   padding: 18px 8px;
   color: var(--muted);
@@ -1098,6 +1387,15 @@ code {
 }
 
 @media (max-width: 800px) {
+  .guide-drawer {
+    width: 100vw;
+    border-left: 0;
+  }
+
+  .recommendation-grid {
+    grid-template-columns: 1fr;
+  }
+
   .settings-form {
     grid-template-columns: 1fr;
   }
@@ -1244,6 +1542,34 @@ code {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .guide-drawer {
+    padding: 16px;
+  }
+
+  .guide-header {
+    top: -16px;
+    margin: -16px -16px 16px;
+    padding: 16px;
+  }
+
+  .guide-section {
+    padding: 13px;
+  }
+
+  .command-row,
+  .recommendation-controls,
+  .quick-start-actions {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .command-row .copy-button,
+  .recommendation-controls .button,
+  .quick-start-actions .button {
+    width: 100%;
   }
 
   .run-actions {

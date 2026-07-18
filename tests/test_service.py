@@ -15,6 +15,7 @@ from agentbraid.errors import (
     WorktreeError,
 )
 from agentbraid.models import (
+    CodexReasoningEffort,
     DeliveryMode,
     Executor,
     HostTaskResult,
@@ -583,6 +584,7 @@ def test_saved_settings_and_run_overrides_resolve_into_snapshot(tmp_path: Path) 
             workspace=str(tmp_path),
             codex_binary="codex",
             codex_model="saved-codex",
+            codex_reasoning_effort=CodexReasoningEffort.MEDIUM,
             host_model="saved-agy-label",
             delivery_mode=DeliveryMode.REPORT_ONLY,
             max_parallel_codex=2,
@@ -604,6 +606,7 @@ def test_saved_settings_and_run_overrides_resolve_into_snapshot(tmp_path: Path) 
             goal="Resolve settings.",
             execution=RunExecutionOverrides(
                 codex_model="run-codex",
+                codex_reasoning_effort=CodexReasoningEffort.HIGH,
                 routing_mode=RoutingMode.CODEX_ONLY,
                 workspace_mode=WorkspaceMode.READ_ONLY,
                 max_parallel_codex=3,
@@ -613,6 +616,7 @@ def test_saved_settings_and_run_overrides_resolve_into_snapshot(tmp_path: Path) 
 
     assert run.execution_settings is not None
     assert run.execution_settings.codex_model == "run-codex"
+    assert run.execution_settings.codex_reasoning_effort == CodexReasoningEffort.HIGH
     assert run.execution_settings.host_model == "saved-agy-label"
     assert run.execution_settings.routing_mode == RoutingMode.CODEX_ONLY
     assert run.execution_settings.delivery_mode == DeliveryMode.REPORT_ONLY

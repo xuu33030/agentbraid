@@ -10,7 +10,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-PACKAGE_VERSION = "0.2.0a2"
+PACKAGE_VERSION = "0.2.0a3"
 
 
 def has_suffix(names: list[str], suffix: str) -> bool:
@@ -44,6 +44,7 @@ def check_wheel(path: Path) -> None:
         "agentbraid/dashboard_assets/app.css",
         "agentbraid/dashboard_assets/app.js",
         "agentbraid/dashboard_assets/locales.json",
+        "agentbraid/model_data/manifest-v1.json",
         ".dist-info/licenses/LICENSE",
         ".dist-info/licenses/NOTICE",
         ".dist-info/licenses/THIRD_PARTY_NOTICES.md",

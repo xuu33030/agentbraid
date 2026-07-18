@@ -142,8 +142,12 @@ state database. The Dashboard does not scan other custom databases.
   AgentBraid, not arbitrary database changes.
 - If the run workspace was moved or deleted, history remains viewable but apply is disabled.
 
-The Dashboard's Codex model changes actual Codex CLI invocations. Its AGY model value is only a
-routing label and cannot change the model selected by Antigravity. Choose that model in AGY.
+The Dashboard's Codex model and reasoning effort change actual Codex CLI invocations. Its AGY model
+value updates the run routing label and generated `agy --model ...` command, but cannot change an
+open Antigravity session. Start a new AGY session with the generated command or use `/model` in AGY.
+
+If model refresh fails, verify `codex debug models --bundled` and `agy models` directly. Manual model
+input remains available. External scoring failures preserve the prior validated local cache.
 
 ## Provider timeout, quota, or unavailable errors
 

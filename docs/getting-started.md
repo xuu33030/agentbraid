@@ -25,7 +25,7 @@ will keep on disk:
 ```bash
 python -m venv ~/.venvs/agentbraid
 source ~/.venvs/agentbraid/bin/activate
-python -m pip install /path/to/agentbraid-0.2.0a2-py3-none-any.whl
+python -m pip install /path/to/agentbraid-0.2.0a3-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -34,7 +34,7 @@ Windows PowerShell:
 ```powershell
 py -3.13 -m venv $HOME\.venvs\agentbraid
 & $HOME\.venvs\agentbraid\Scripts\Activate.ps1
-python -m pip install C:\path\to\agentbraid-0.2.0a2-py3-none-any.whl
+python -m pip install C:\path\to\agentbraid-0.2.0a3-py3-none-any.whl
 agentbraid --version
 ```
 
@@ -178,15 +178,21 @@ The run view provides:
 - observed Codex input, cached input, output, reasoning, duration, and retry attribution;
 - capability health and final delivery readiness;
 - direct run creation with Codex model and execution controls;
-- per-workspace defaults, localized run-name editing, and observed model suggestions;
+- per-workspace defaults, localized run-name editing, model catalogs, and quality-first suggestions;
+- a fixed usage guide with safely quoted macOS/Linux and PowerShell commands;
 - explicit cancellation, selected-history cleanup, and reviewed fast-forward apply controls.
 
-Choose **Start run** to select a known workspace and configure the run. The Codex model field is
-passed to the official Codex CLI. The AGY model field is only a routing label used for host-task
-capability history; the Dashboard does not launch Antigravity or choose its actual model. Hybrid
-routing may therefore pause for the authenticated Antigravity MCP host to claim a host-assigned
-task. Choose **Codex-only** when every task must stay with Codex, or **Read-only** when the planned
-task graph must not contain workspace mutations.
+Choose **Start run** to select a known workspace and configure the run. The Codex model and optional
+reasoning effort are passed to the official Codex CLI without editing the user's Codex config. The
+AGY model is stored as a routing label and used to generate a copyable `agy --model ...` command; it
+cannot change an already open AGY session. Hybrid routing may therefore pause for the authenticated
+Antigravity MCP host to claim a host-assigned task. Choose **Codex-only** when every task must stay
+with Codex, or **Read-only** when the planned task graph must not contain workspace mutations.
+
+The fixed **Guide** entry provides first-setup, daily-start, model, and AGY TUI commands. Refreshing
+models runs only `codex debug models` and `agy models` with fixed argument vectors, time and output
+limits, and no shell. External scoring data is downloaded from the fixed AgentBraid GitHub manifest
+only after selecting the opt-in checkbox. No workspace, goal, usage, or token data is sent.
 
 Choose **Settings** to save workspace defaults. Changes to the Codex executable or managed
 worktree directory require restarting both Dashboard and MCP processes; database and state paths
@@ -232,6 +238,7 @@ Workspace settings can be stored in `.agentbraid.toml`:
 
 ```toml
 [agentbraid]
+codex_reasoning_effort = "medium"
 codex_timeout_seconds = 1800
 max_parallel_codex = 1
 max_output_bytes = 10485760
@@ -242,6 +249,8 @@ Useful environment overrides include:
 
 - `AGENTBRAID_STATE_DIR`: platform-specific runtime state root
 - `AGENTBRAID_CODEX_MODEL`: optional Codex CLI model selection
+- `AGENTBRAID_CODEX_REASONING_EFFORT`: optional `low`, `medium`, `high`, `xhigh`, `max`, or
+  `ultra` Codex reasoning override
 - `AGENTBRAID_CODEX_TIMEOUT_SECONDS`: provider invocation timeout
 - `AGENTBRAID_MAX_OUTPUT_BYTES`: structured provider output limit
 - `AGENTBRAID_MAX_TASK_ATTEMPTS`: global retry ceiling

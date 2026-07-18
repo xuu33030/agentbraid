@@ -1,21 +1,23 @@
 # Provider policy
 
-Last reviewed: 2026-07-16
+Last reviewed: 2026-07-18
 
 AgentBraid integrates only through documented provider interfaces and a user's own account.
 This document describes the project boundary; it is not legal advice.
 
 ## Antigravity
 
-Supported in v0.1:
+Supported in v0.2:
 
 - The user launches and signs in to the official Antigravity CLI.
 - Antigravity loads AgentBraid as a local MCP server and workspace skill.
 - The active Antigravity agent claims typed host tasks and submits typed results.
+- A user-triggered Dashboard action runs the documented `agy models` command only to list model
+  names. It uses no prompt, does not start the TUI, and does not read or export credentials.
 
 Not supported:
 
-- AgentBraid launching `agy`, including `agy --print`
+- AgentBraid launching the AGY TUI or any prompt execution, including `agy --print`
 - reading or copying Antigravity keyring or OAuth data
 - using one user's Antigravity login from another process or for another user
 
@@ -25,6 +27,7 @@ Official references:
 - [Agent Skills](https://antigravity.google/docs/skills)
 - [Plugins and skills](https://antigravity.google/docs/cli-plugins)
 - [FAQ](https://antigravity.google/docs/faq)
+- [Antigravity CLI model selection](https://codelabs.developers.google.com/antigravity-cli-hands-on#4)
 
 The FAQ currently says third-party software may not use an Antigravity login to access the
 service. The official MCP and Skill documentation supports local workspace tools under
@@ -53,5 +56,6 @@ Provider behavior and terms can change. Review this file before each release. A 
 that invalidates an adapter is a security issue and may disable that adapter without a normal
 deprecation period.
 
-The `v0.1.0-alpha.1` review on 2026-07-16 found no change requiring either adapter to be disabled.
-This is a technical boundary review, not legal advice or a guarantee of provider approval.
+The `v0.2.0-alpha.3` review on 2026-07-18 keeps AGY execution host-mediated and limits Dashboard
+discovery to `agy models`. This is a technical boundary review, not legal advice or a guarantee of
+provider approval.

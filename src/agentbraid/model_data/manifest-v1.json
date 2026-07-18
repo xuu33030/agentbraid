@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "manifest_version": "2026.07.18.1",
+  "generated_at": "2026-07-18",
+  "sources": [
+    {
+      "source_id": "swe-bench",
+      "name": "SWE-bench",
+      "url": "https://github.com/SWE-bench/swe-bench",
+      "license_status": "redistributable",
+      "notes": "Exact, license-compatible model results may be added in later manifests."
+    },
+    {
+      "source_id": "terminal-bench",
+      "name": "Terminal-Bench",
+      "url": "https://www.tbench.ai/leaderboard/terminal-bench/2.0",
+      "license_status": "redistributable",
+      "notes": "Exact, license-compatible model results may be added in later manifests."
+    },
+    {
+      "source_id": "artificial-analysis",
+      "name": "Artificial Analysis",
+      "url": "https://artificialanalysis.ai/data-api",
+      "license_status": "reference_only",
+      "notes": "Reference only; restricted data is not bundled or used for scoring."
+    }
+  ],
+  "entries": []
+}

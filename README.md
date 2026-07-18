@@ -32,8 +32,9 @@ flowchart LR
     host -->|"claimed host task"| git
 ```
 
-AgentBraid never launches `agy`, reads Antigravity credentials, or proxies Google account
-access. See [`docs/provider-policy.md`](docs/provider-policy.md) and
+AgentBraid never launches the AGY TUI, reads Antigravity credentials, or proxies Google account
+access. The Dashboard may run only the fixed, read-only `agy models` catalog command. See
+[`docs/provider-policy.md`](docs/provider-policy.md) and
 [`docs/security-boundaries.md`](docs/security-boundaries.md) for the supported boundary.
 The detailed component and sequence diagrams are in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -83,10 +84,10 @@ agentbraid dashboard .
 ```
 
 The Dashboard binds only to `127.0.0.1`, uses an ephemeral authenticated browser session, and can
-start, inspect, rename, cancel, safely delete, or explicitly apply runs. It controls the actual
-Codex model and execution settings. An AGY model value is routing metadata only: AgentBraid never
-launches or controls Antigravity, and host-assigned tasks still require the authenticated
-Antigravity MCP host.
+start, inspect, rename, cancel, safely delete, or explicitly apply runs. Its fixed guide provides
+copyable commands, model catalogs, quality-first recommendations, and actual Codex model/reasoning
+settings. An AGY model value updates routing metadata and a launch command only; AgentBraid never
+opens or controls an AGY session, and host-assigned tasks still require the authenticated host.
 
 For complete platform instructions and the MCP tool sequence, read
 [`docs/getting-started.md`](docs/getting-started.md) and

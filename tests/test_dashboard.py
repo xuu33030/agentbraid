@@ -15,7 +15,9 @@ from agentbraid.dashboard import (
     summarize_usage,
 )
 from agentbraid.errors import RunNotFoundError
+from agentbraid.model_intelligence import CommandResult, ModelIntelligence
 from agentbraid.models import (
+    CodexReasoningEffort,
     Executor,
     LocalizedRunNames,
     ProviderInvocationOutcome,
@@ -198,6 +200,8 @@ def test_dashboard_requires_bootstrap_session_and_security_headers(tmp_path: Pat
     index = client.get("/")
     assert index.status_code == 200
     assert "AgentBraid Dashboard" in index.text
+    assert 'id="guide-drawer"' in index.text
+    assert 'id="start-codex-effort"' in index.text
     assert "frame-ancestors 'none'" in index.headers["content-security-policy"]
     assert index.headers["cache-control"] == "no-store"
     assert client.get("/assets/app.css").status_code == 200
@@ -205,6 +209,8 @@ def test_dashboard_requires_bootstrap_session_and_security_headers(tmp_path: Pat
     assert script.status_code == 200
     assert "innerHTML" not in script.text
     assert "agentbraid_dashboard_locale" in script.text
+    assert "navigator.clipboard" in script.text
+    assert 'document.execCommand("copy")' in script.text
     assert "localStorage" not in script.text
     locales = client.get("/assets/locales.json")
     assert locales.status_code == 200
@@ -236,6 +242,10 @@ def test_dashboard_locales_have_matching_complete_key_sets(tmp_path: Path) -> No
         "cleanup.worktree",
         "routingMode.codex_only",
         "toast.languageChanged",
+        "guide.title",
+        "action.copyAll",
+        "form.codexEffort",
+        "toast.recommendationApplied",
     } <= key_sets["en"]
     assert all(
         isinstance(message, str) and message.strip()
@@ -325,6 +335,7 @@ def test_dashboard_settings_and_model_options_are_workspace_scoped(tmp_path: Pat
     options = client.get("/api/v1/model-options").json()
     settings_payload = client.get("/api/v1/settings", params={"workspace": str(workspace)}).json()
     settings_payload["settings"]["codex_model"] = "dashboard-codex"
+    settings_payload["settings"]["codex_reasoning_effort"] = "xhigh"
     settings_payload["settings"]["host_model"] = "agy-routing-label"
     saved = client.put(
         "/api/v1/settings",
@@ -337,6 +348,7 @@ def test_dashboard_settings_and_model_options_are_workspace_scoped(tmp_path: Pat
     assert settings_payload["database_path"] == str(config.database_path.resolve())
     assert saved.status_code == 200
     assert saved.json()["settings"]["codex_model"] == "dashboard-codex"
+    assert saved.json()["settings"]["codex_reasoning_effort"] == "xhigh"
     assert saved.json()["settings"]["host_model"] == "agy-routing-label"
     assert saved.json()["requires_restart"] is False
 
@@ -351,6 +363,81 @@ def test_dashboard_settings_and_model_options_are_workspace_scoped(tmp_path: Pat
     assert restart.json()["requires_restart"] is True
 
 
+def test_dashboard_model_refresh_recommendation_and_guide_apis(tmp_path: Path) -> None:
+    workspace = repository(tmp_path)
+    config = dashboard_config(tmp_path)
+    store = StateStore(config.database_path)
+
+    class Runner:
+        def run(
+            self,
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            max_output_bytes: int,
+        ) -> CommandResult:
+            del cwd, timeout, max_output_bytes
+            if argv == ["codex", "debug", "models"]:
+                return CommandResult(
+                    0,
+                    b'{"models":[{"slug":"gpt-guide","display_name":"GPT Guide",'
+                    b'"visibility":"list","supported_reasoning_levels":'
+                    b'[{"effort":"low"},{"effort":"medium"}]}]}',
+                )
+            assert argv == ["agy", "models"]
+            return CommandResult(0, b"Gemini Guide Medium\nGemini Guide Low\n")
+
+    intelligence = ModelIntelligence(config.state_dir, runner=Runner())
+    controller = DashboardController(
+        config,
+        store,
+        initial_workspace=workspace,
+        model_intelligence=intelligence,
+    )
+    security = DashboardSecurity.create("http://testserver", frozenset({"testserver"}))
+    client = TestClient(
+        create_dashboard_app(controller, security),
+        base_url="http://testserver",
+        follow_redirects=False,
+    )
+    authenticate(client, security)
+    endpoint = "/api/v1/model-options/refresh"
+    body = {"workspace": str(workspace), "include_external": False}
+
+    assert client.post(endpoint, json=body).status_code == 403
+    refreshed = client.post(
+        endpoint,
+        headers={
+            "Origin": security.origin,
+            "X-AgentBraid-CSRF": security.csrf_token,
+        },
+        json=body,
+    )
+    recommendations = client.get(
+        "/api/v1/model-recommendations",
+        params={"workspace": str(workspace), "complexity": "standard"},
+    )
+    guide = client.get(
+        "/api/v1/guide",
+        params={"workspace": str(workspace), "agy_model": "Gemini Guide Medium"},
+    )
+
+    assert refreshed.status_code == 200
+    assert refreshed.json()["codex"] == ["gpt-guide"]
+    assert recommendations.status_code == 200
+    assert recommendations.json()["codex"][0]["recommended_effort"] == "medium"
+    assert guide.status_code == 200
+    assert "agy --model" in guide.json()["shells"]["powershell"][1]["commands"][1]["command"]
+    assert (
+        client.get(
+            "/api/v1/model-recommendations",
+            params={"workspace": str(workspace), "complexity": "unknown"},
+        ).status_code
+        == 409
+    )
+
+
 def test_dashboard_environment_settings_remain_locked(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -358,11 +445,13 @@ def test_dashboard_environment_settings_remain_locked(
     workspace = repository(tmp_path)
     config = dashboard_config(tmp_path)
     monkeypatch.setenv("AGENTBRAID_CODEX_MODEL", "locked-by-environment")
+    monkeypatch.setenv("AGENTBRAID_CODEX_REASONING_EFFORT", "high")
     config = config.__class__(
         state_dir=config.state_dir,
         database_path=config.database_path,
         worktree_dir=config.worktree_dir,
         codex_model="locked-by-environment",
+        codex_reasoning_effort=CodexReasoningEffort.HIGH,
     )
     controller = DashboardController(
         config,
@@ -371,7 +460,10 @@ def test_dashboard_environment_settings_remain_locked(
     )
     payload = controller.get_settings(str(workspace))
     attempted = WorkspaceSettings.model_validate(payload["settings"]).model_copy(
-        update={"codex_model": "browser-override"}
+        update={
+            "codex_model": "browser-override",
+            "codex_reasoning_effort": CodexReasoningEffort.LOW,
+        }
     )
 
     saved = controller.save_settings(attempted)
@@ -381,7 +473,9 @@ def test_dashboard_environment_settings_remain_locked(
     assert isinstance(locked_fields, list)
     assert isinstance(saved_settings, dict)
     assert "codex_model" in locked_fields
+    assert "codex_reasoning_effort" in locked_fields
     assert saved_settings["codex_model"] == "locked-by-environment"
+    assert saved_settings["codex_reasoning_effort"] == "high"
 
 
 def test_dashboard_rename_preview_and_delete_run_with_local_data(tmp_path: Path) -> None:
