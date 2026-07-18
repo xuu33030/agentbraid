@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import re
 import subprocess
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 from agentbraid.errors import WorktreeConflictError, WorktreeError
+from agentbraid.models import RunCleanupArtifact, RunCleanupPreview, RunSnapshot, RunStatus
 from agentbraid.redaction import redact_text
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -259,6 +261,146 @@ class WorktreeManager:
             raise WorktreeError("integration branch does not exist", detail=integration_branch)
         return target
 
+    def preview_run_cleanup(self, run: RunSnapshot) -> RunCleanupPreview:
+        blockers: list[str] = []
+        artifacts: list[RunCleanupArtifact] = []
+        if run.status not in {RunStatus.COMPLETED, RunStatus.CANCELLED, RunStatus.FAILED}:
+            blockers.append(f"run status is not terminal: {run.status.value}")
+
+        repository = self.repository_root()
+        integration_branch = run.integration_branch
+        paths: list[tuple[Path, str]] = [
+            (self.integration_path(run.run_id), integration_branch or "")
+        ]
+        for task in run.tasks:
+            expected = self.task_path(run.run_id, task.spec.task_id)
+            if task.worktree_path is not None and Path(task.worktree_path).resolve() != expected:
+                blockers.append(f"task worktree path is not managed: {task.spec.task_id}")
+            paths.append((expected, self.task_branch(run.run_id, task.spec.task_id)))
+
+        integration_branch_exists = bool(
+            integration_branch and self._branch_exists(integration_branch)
+        )
+        task_branch_exists = {
+            task.spec.task_id: self._branch_exists(self.task_branch(run.run_id, task.spec.task_id))
+            for task in run.tasks
+        }
+        has_managed_artifacts = (
+            any(path.exists() for path, _ in paths)
+            or integration_branch_exists
+            or any(task_branch_exists.values())
+        )
+        if has_managed_artifacts:
+            if run.base_commit is None:
+                blockers.append(
+                    "repository identity cannot be verified without the run base commit"
+                )
+            elif not self._commit_exists(run.base_commit):
+                blockers.append("run base commit is missing from the current repository")
+
+        for path, branch in paths:
+            removable = True
+            detail: str | None = None
+            if path.exists():
+                try:
+                    if branch:
+                        self._assert_worktree_branch(path, branch)
+                    self.assert_clean_worktree(path)
+                except WorktreeError as exc:
+                    removable = False
+                    detail = exc.message
+                    blockers.append(f"worktree is not safely removable: {path}")
+            artifacts.append(
+                RunCleanupArtifact(
+                    kind="worktree",
+                    identifier=str(path),
+                    removable=removable,
+                    detail=detail,
+                )
+            )
+
+        if integration_branch and integration_branch_exists:
+            merged = (
+                self._run_git(
+                    ["merge-base", "--is-ancestor", integration_branch, "HEAD"],
+                    cwd=repository,
+                ).returncode
+                == 0
+            )
+            if not merged:
+                blockers.append(f"integration branch is not merged: {integration_branch}")
+            artifacts.append(
+                RunCleanupArtifact(
+                    kind="branch",
+                    identifier=integration_branch,
+                    removable=merged,
+                    detail=None if merged else "branch contains unapplied work",
+                )
+            )
+
+        comparison = (
+            integration_branch if integration_branch and integration_branch_exists else "HEAD"
+        )
+        for task in run.tasks:
+            branch = self.task_branch(run.run_id, task.spec.task_id)
+            if not task_branch_exists[task.spec.task_id]:
+                continue
+            cherry = self._git(["cherry", comparison, branch], cwd=repository)
+            equivalent = not any(line.startswith("+") for line in cherry.splitlines())
+            if not equivalent:
+                blockers.append(f"task branch has unique work: {branch}")
+            artifacts.append(
+                RunCleanupArtifact(
+                    kind="branch",
+                    identifier=branch,
+                    removable=equivalent,
+                    detail=None if equivalent else "branch contains unique patches",
+                )
+            )
+
+        deletable = not blockers
+        artifacts.insert(
+            0,
+            RunCleanupArtifact(
+                kind="database",
+                identifier=run.run_id,
+                removable=deletable,
+                detail=None if deletable else "record preserved until local cleanup is safe",
+            ),
+        )
+        return RunCleanupPreview(
+            run_id=run.run_id,
+            deletable=deletable,
+            blockers=blockers,
+            artifacts=artifacts,
+        )
+
+    def cleanup_run_artifacts(self, run: RunSnapshot) -> RunCleanupPreview:
+        preview = self.preview_run_cleanup(run)
+        if not preview.deletable:
+            raise WorktreeError(
+                "run artifacts are not safely removable",
+                detail="; ".join(preview.blockers),
+            )
+        repository = self.repository_root()
+        paths = [self.task_path(run.run_id, task.spec.task_id) for task in run.tasks]
+        paths.append(self.integration_path(run.run_id))
+        for path in paths:
+            if path.exists():
+                self._git(["worktree", "remove", str(path)], cwd=repository)
+        for task in run.tasks:
+            branch = self.task_branch(run.run_id, task.spec.task_id)
+            if self._branch_exists(branch):
+                self._git(["branch", "-D", branch], cwd=repository)
+        if run.integration_branch and self._branch_exists(run.integration_branch):
+            self._git(["branch", "-d", run.integration_branch], cwd=repository)
+        self._git(["worktree", "prune"], cwd=repository)
+        run_root = self.worktree_root / _safe_segment(run.run_id, "run ID")
+        for candidate in (run_root / "tasks", run_root):
+            with suppress(OSError):
+                candidate.rmdir()
+        return preview
+
     def assert_clean_worktree(self, path: Path) -> None:
         resolved = path.expanduser().resolve()
         status = self._git(
@@ -327,6 +469,13 @@ class WorktreeManager:
     def _branch_exists(self, branch: str) -> bool:
         completed = self._run_git(
             ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            cwd=self.repository_root(),
+        )
+        return completed.returncode == 0
+
+    def _commit_exists(self, commit: str) -> bool:
+        completed = self._run_git(
+            ["cat-file", "-e", f"{commit}^{{commit}}"],
             cwd=self.repository_root(),
         )
         return completed.returncode == 0

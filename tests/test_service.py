@@ -7,12 +7,21 @@ from pathlib import Path
 import pytest
 
 from agentbraid.config import AgentBraidConfig
-from agentbraid.errors import SecurityBoundaryError, StateError, WorktreeError
+from agentbraid.errors import (
+    RoutingError,
+    RunNotFoundError,
+    SecurityBoundaryError,
+    StateError,
+    WorktreeError,
+)
 from agentbraid.models import (
     DeliveryMode,
     Executor,
     HostTaskResult,
+    LocalizedRunNames,
     ProviderInvocationOutcome,
+    RoutingMode,
+    RunExecutionOverrides,
     RunPlan,
     RunReview,
     RunSnapshot,
@@ -24,6 +33,8 @@ from agentbraid.models import (
     TaskStatus,
     ValidationEvidence,
     WorkerResult,
+    WorkspaceMode,
+    WorkspaceSettings,
 )
 from agentbraid.providers.base import ProviderUsage, StructuredProviderResult
 from agentbraid.service import AgentBraidService
@@ -537,6 +548,174 @@ async def test_parallel_codex_setting_and_retry_ceiling_are_applied(tmp_path: Pa
     assert run.status == RunStatus.COMPLETED
     assert planner.max_active == 2
     assert all(task.spec.max_attempts == 1 for task in run.tasks)
+
+
+@pytest.mark.asyncio
+async def test_planning_persists_localized_run_names(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    names = LocalizedRunNames.model_validate(
+        {
+            "en": "Inspect project README",
+            "zh-TW": "檢查專案 README",
+            "zh-CN": "检查项目 README",
+        }
+    )
+    plan = host_plan().model_copy(update={"display_names": names})
+    service = AgentBraidService(
+        make_config(tmp_path),
+        tmp_path,
+        codex=FakePlanner(plan),
+    )
+
+    run = await service.start_run(StartRunRequest(goal="Inspect README."))
+
+    assert run.display_names == names
+    assert service.store.list_runs()[0].display_names == names
+    assert run.request.goal == "Inspect README."
+
+
+def test_saved_settings_and_run_overrides_resolve_into_snapshot(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    config = make_config(tmp_path)
+    store = StateStore(config.database_path)
+    store.upsert_workspace_settings(
+        WorkspaceSettings(
+            workspace=str(tmp_path),
+            codex_binary="codex",
+            codex_model="saved-codex",
+            host_model="saved-agy-label",
+            delivery_mode=DeliveryMode.REPORT_ONLY,
+            max_parallel_codex=2,
+            max_task_attempts=3,
+            codex_timeout_seconds=900,
+            max_output_bytes=4 * 1024 * 1024,
+            worktree_dir=str(config.worktree_dir),
+        )
+    )
+    service = AgentBraidService(
+        config,
+        tmp_path,
+        store=store,
+        codex=FakePlanner(host_plan()),
+    )
+
+    run = service.create_run(
+        StartRunRequest(
+            goal="Resolve settings.",
+            execution=RunExecutionOverrides(
+                codex_model="run-codex",
+                routing_mode=RoutingMode.CODEX_ONLY,
+                workspace_mode=WorkspaceMode.READ_ONLY,
+                max_parallel_codex=3,
+            ),
+        )
+    )
+
+    assert run.execution_settings is not None
+    assert run.execution_settings.codex_model == "run-codex"
+    assert run.execution_settings.host_model == "saved-agy-label"
+    assert run.execution_settings.routing_mode == RoutingMode.CODEX_ONLY
+    assert run.execution_settings.delivery_mode == DeliveryMode.REPORT_ONLY
+    assert run.execution_settings.workspace_mode == WorkspaceMode.READ_ONLY
+    assert run.execution_settings.max_parallel_codex == 3
+    assert run.execution_settings.max_task_attempts == 3
+    assert run.execution_settings.codex_timeout_seconds == 900
+
+
+@pytest.mark.asyncio
+async def test_codex_only_routes_host_preference_to_codex(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    planner = ParallelPlanner(host_plan())
+    service = AgentBraidService(make_config(tmp_path), tmp_path, codex=planner)
+
+    run = await service.start_run(
+        StartRunRequest(
+            goal="Inspect without AGY execution.",
+            execution=RunExecutionOverrides(
+                routing_mode=RoutingMode.CODEX_ONLY,
+                workspace_mode=WorkspaceMode.READ_ONLY,
+            ),
+        )
+    )
+
+    assert run.status == RunStatus.COMPLETED
+    assert run.tasks[0].executor == Executor.CODEX
+    assert [task.task_id for task in planner.worker_tasks] == ["host-task"]
+
+
+@pytest.mark.asyncio
+async def test_read_only_run_blocks_mutating_plan(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    config = make_config(tmp_path)
+    store = StateStore(config.database_path)
+    service = AgentBraidService(
+        config,
+        tmp_path,
+        store=store,
+        codex=FakePlanner(codex_plan(), worker_writes=True),
+    )
+
+    with pytest.raises(RoutingError, match="read-only"):
+        await service.start_run(
+            StartRunRequest(
+                goal="Do not allow writes.",
+                execution=RunExecutionOverrides(workspace_mode=WorkspaceMode.READ_ONLY),
+            )
+        )
+
+    assert store.list_runs()[0].status == RunStatus.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_delete_run_removes_database_worktrees_and_merged_branches(
+    tmp_path: Path,
+) -> None:
+    initialize_repository(tmp_path)
+    service = AgentBraidService(
+        make_config(tmp_path),
+        tmp_path,
+        codex=FakePlanner(codex_plan(), worker_writes=True),
+    )
+    run = await service.start_run(StartRunRequest(goal="Prepare disposable work."))
+    service.apply_run(run.run_id, "apply-reviewed-run")
+    run = service.get_run(run.run_id)
+    worktree_paths = [Path(task.worktree_path) for task in run.tasks if task.worktree_path]
+    worktree_paths.append(service.worktrees.integration_path(run.run_id))
+
+    preview = service.preview_run_cleanup(run.run_id)
+    result = service.delete_run(run.run_id)
+
+    assert preview.deletable is True
+    assert result.deleted is True
+    assert all(not path.exists() for path in worktree_paths)
+    assert git(tmp_path, "branch", "--list", run.integration_branch or "") == ""
+    with pytest.raises(RunNotFoundError):
+        service.get_run(run.run_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_run_preserves_dirty_or_unmerged_work(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    service = AgentBraidService(
+        make_config(tmp_path),
+        tmp_path,
+        codex=FakePlanner(codex_plan(), worker_writes=True),
+    )
+    run = await service.start_run(StartRunRequest(goal="Preserve unsafe cleanup targets."))
+    integration_path = service.worktrees.integration_path(run.run_id)
+    (integration_path / "uncommitted.txt").write_text("keep me\n", encoding="utf-8")
+
+    preview = service.preview_run_cleanup(run.run_id)
+    result = service.delete_run(run.run_id)
+
+    assert preview.deletable is False
+    assert preview.artifacts[0].kind == "database"
+    assert preview.artifacts[0].removable is False
+    assert any("not merged" in blocker for blocker in preview.blockers)
+    assert any("worktree" in blocker for blocker in preview.blockers)
+    assert result.deleted is False
+    assert integration_path.exists()
+    assert service.get_run(run.run_id).run_id == run.run_id
 
 
 @pytest.mark.asyncio

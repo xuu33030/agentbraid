@@ -196,6 +196,43 @@ def test_route_plan_uses_requested_models_and_preserves_task_ids() -> None:
     assert assignments["route-task"].executor == Executor.HOST
 
 
+def test_route_plan_can_restrict_assignments_to_codex() -> None:
+    run_plan = RunPlan(
+        summary="Route one task without host execution.",
+        tasks=[task(preferred=Executor.HOST)],
+        final_acceptance_criteria=["Task is routed to Codex."],
+    )
+
+    assignments = TaskRouter().route_plan(
+        run_plan,
+        [],
+        codex_model="codex-model",
+        host_model="host-model",
+        allowed_executors=frozenset({Executor.CODEX}),
+        now=NOW,
+    )
+
+    assert assignments["route-task"].executor == Executor.CODEX
+
+
+def test_codex_only_rejects_an_explicit_host_requirement() -> None:
+    run_plan = RunPlan(
+        summary="Reject an impossible host-only task.",
+        tasks=[task(required_capabilities=["executor:host"])],
+        final_acceptance_criteria=["Routing fails closed."],
+    )
+
+    with pytest.raises(RoutingError, match="no executor is available"):
+        TaskRouter().route_plan(
+            run_plan,
+            [],
+            codex_model="codex-model",
+            host_model="host-model",
+            allowed_executors=frozenset({Executor.CODEX}),
+            now=NOW,
+        )
+
+
 def test_new_model_does_not_inherit_another_models_unavailable_state() -> None:
     run_plan = RunPlan(
         summary="Route one host task.",

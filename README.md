@@ -83,8 +83,10 @@ agentbraid dashboard .
 ```
 
 The Dashboard binds only to `127.0.0.1`, uses an ephemeral authenticated browser session, and can
-inspect, cancel, or explicitly apply existing runs. Starting runs and completing host tasks remain
-inside Antigravity.
+start, inspect, rename, cancel, safely delete, or explicitly apply runs. It controls the actual
+Codex model and execution settings. An AGY model value is routing metadata only: AgentBraid never
+launches or controls Antigravity, and host-assigned tasks still require the authenticated
+Antigravity MCP host.
 
 For complete platform instructions and the MCP tool sequence, read
 [`docs/getting-started.md`](docs/getting-started.md) and

@@ -83,6 +83,69 @@ class DeliveryMode(StrEnum):
     REPORT_ONLY = "report_only"
 
 
+class RoutingMode(StrEnum):
+    HYBRID = "hybrid"
+    CODEX_ONLY = "codex_only"
+
+
+class WorkspaceMode(StrEnum):
+    READ_ONLY = "read_only"
+    WORKTREE_WRITE = "worktree_write"
+
+
+class DashboardLocale(StrEnum):
+    EN = "en"
+    ZH_TW = "zh-TW"
+    ZH_CN = "zh-CN"
+
+
+class LocalizedRunNames(StrictModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    en: str = Field(min_length=1, max_length=100)
+    zh_tw: str = Field(alias="zh-TW", min_length=1, max_length=100)
+    zh_cn: str = Field(alias="zh-CN", min_length=1, max_length=100)
+
+
+class RunExecutionOverrides(StrictModel):
+    codex_model: str | None = Field(default=None, min_length=1, max_length=200)
+    host_model: str | None = Field(default=None, min_length=1, max_length=200)
+    routing_mode: RoutingMode | None = None
+    delivery_mode: DeliveryMode | None = None
+    workspace_mode: WorkspaceMode | None = None
+    max_parallel_codex: int | None = Field(default=None, ge=1, le=8)
+    max_task_attempts: int | None = Field(default=None, ge=1, le=3)
+    codex_timeout_seconds: int | None = Field(default=None, ge=60, le=7200)
+    max_output_bytes: int | None = Field(
+        default=None,
+        ge=1024 * 1024,
+        le=100 * 1024 * 1024,
+    )
+
+
+class RunExecutionSettings(StrictModel):
+    codex_binary: str = Field(min_length=1, max_length=1000)
+    codex_model: str | None = Field(default=None, min_length=1, max_length=200)
+    host_model: str = Field(default="antigravity-auto", min_length=1, max_length=200)
+    routing_mode: RoutingMode = RoutingMode.HYBRID
+    delivery_mode: DeliveryMode = DeliveryMode.INTEGRATION_BRANCH
+    workspace_mode: WorkspaceMode = WorkspaceMode.WORKTREE_WRITE
+    max_parallel_codex: int = Field(default=1, ge=1, le=8)
+    max_task_attempts: int = Field(default=2, ge=1, le=3)
+    codex_timeout_seconds: int = Field(default=1800, ge=60, le=7200)
+    max_output_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=100 * 1024 * 1024,
+    )
+    worktree_dir: str = Field(min_length=1, max_length=4000)
+
+
+class WorkspaceSettings(RunExecutionSettings):
+    workspace: str = Field(min_length=1, max_length=4000)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class ValidationEvidence(StrictModel):
     command: str = Field(min_length=1, max_length=1000)
     passed: bool
@@ -114,6 +177,7 @@ class TaskSpec(StrictModel):
 
 class RunPlan(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
+    display_names: LocalizedRunNames | None = None
     summary: str = Field(min_length=1, max_length=5000)
     tasks: list[TaskSpec] = Field(min_length=1, max_length=100)
     final_acceptance_criteria: list[str] = Field(min_length=1, max_length=30)
@@ -186,6 +250,7 @@ class StartRunRequest(StrictModel):
     host_model: str = Field(default="antigravity-auto", min_length=1, max_length=200)
     constraints: list[str] = Field(default_factory=list, max_length=50)
     delivery_mode: DeliveryMode = DeliveryMode.INTEGRATION_BRANCH
+    execution: RunExecutionOverrides | None = None
 
 
 class TaskState(StrictModel):
@@ -223,6 +288,8 @@ class RunSnapshot(StrictModel):
     run_id: str
     request: StartRunRequest
     status: RunStatus
+    display_names: LocalizedRunNames | None = None
+    execution_settings: RunExecutionSettings | None = None
     plan: RunPlan | None = None
     lead_thread_id: str | None = None
     integration_branch: str | None = None
@@ -240,6 +307,7 @@ class RunSummary(StrictModel):
     run_id: str
     workspace: str
     goal: str
+    display_names: LocalizedRunNames | None = None
     status: RunStatus
     delivery_mode: DeliveryMode
     base_branch: str | None = None
@@ -276,6 +344,26 @@ class ApplyReadiness(StrictModel):
     expected_commit: str | None = None
     current_branch: str | None = None
     current_commit: str | None = None
+
+
+class RunCleanupArtifact(StrictModel):
+    kind: Literal["database", "worktree", "branch"]
+    identifier: str
+    removable: bool
+    detail: str | None = None
+
+
+class RunCleanupPreview(StrictModel):
+    run_id: str
+    deletable: bool
+    blockers: list[str] = Field(default_factory=list)
+    artifacts: list[RunCleanupArtifact] = Field(default_factory=list)
+
+
+class RunCleanupResult(StrictModel):
+    run_id: str
+    deleted: bool
+    blockers: list[str] = Field(default_factory=list)
 
 
 class CapabilityStatus(StrEnum):

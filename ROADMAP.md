@@ -22,6 +22,8 @@ provider interfaces or policies change.
 - [x] Cross-workspace run history from one state database
 - [x] Provider usage, cache, reasoning, attempt, and retry visualization
 - [x] Cross-process cancellation and reviewed apply controls
+- [x] Dashboard run creation and workspace execution settings
+- [x] Localized run names and safe selected-history cleanup
 
 ## After v0.2
 

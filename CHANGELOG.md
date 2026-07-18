@@ -7,15 +7,33 @@ uses semantic versioning after the alpha contract stabilizes.
 
 ## [Unreleased]
 
+## [0.2.0-alpha.2] - 2026-07-18
+
 ### Added
 
 - Add bundled English, Traditional Chinese, and Simplified Chinese Dashboard locales with an
   in-app language selector, browser-language detection, and a loopback-host locale preference.
+- Start runs directly from the Dashboard with workspace-scoped Codex model, routing, delivery,
+  workspace-access, concurrency, retry, timeout, and output-limit controls.
+- Generate editable English, Traditional Chinese, and Simplified Chinese run names during the
+  existing Codex planning call while preserving the original goal.
+- Select run history entries for explicit deletion of their database state and safely removable
+  managed worktrees and branches.
 
 ### Changed
 
 - Improve narrow-screen Dashboard navigation, task graph sizing, provider usage rows, event
-  timelines, and reviewed-apply readiness feedback without changing the run or delivery APIs.
+  timelines, and reviewed-apply readiness feedback while preserving explicit delivery confirmation.
+- Upgrade SQLite state to schema v4 with sequential migration, localized run names, immutable
+  per-run execution settings, and workspace-level Dashboard defaults.
+- Upgrade the Python package to `0.2.0a2`; the intended release tag is `v0.2.0-alpha.2`.
+
+### Security
+
+- Revalidate deletion immediately before cleanup and preserve every selected run when its managed
+  worktree is dirty, its integration branch is unmerged, or a task branch contains unique work.
+- Keep AGY model selection as routing metadata only; the Dashboard launches only the official
+  Codex CLI and never launches, controls, or authenticates as Antigravity.
 
 ## [0.2.0-alpha.1] - 2026-07-17
 
@@ -91,7 +109,8 @@ uses semantic versioning after the alpha contract stabilizes.
 - Integration conflicts require a new bounded repair run; AgentBraid does not force-resolve,
   push, deploy, or publish changes.
 
-[Unreleased]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.1...HEAD
+[Unreleased]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.2...HEAD
+[0.2.0-alpha.2]: https://github.com/xuu33030/agentbraid/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.2...v0.2.0-alpha.1
 [0.1.0-alpha.2]: https://github.com/xuu33030/agentbraid/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/xuu33030/agentbraid/releases/tag/v0.1.0-alpha.1

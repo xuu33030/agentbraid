@@ -43,6 +43,12 @@
       <button id="refresh-button" class="button secondary" type="button" data-i18n="action.refresh">
         Refresh
       </button>
+      <button id="settings-button" class="button secondary" type="button" data-i18n="action.settings">
+        Settings
+      </button>
+      <button id="start-run-button" class="button primary" type="button" data-i18n="action.startRun">
+        Start run
+      </button>
       <div id="connection-state" class="connection-state" role="status" aria-live="polite">
         <span class="connection-dot" aria-hidden="true"></span>
         <span data-i18n="connection.connecting">Connecting</span>
@@ -77,6 +83,12 @@
       </div>
       <div id="run-list-region" class="run-list-region">
         <div id="scope-summary" class="scope-summary" aria-live="polite"></div>
+        <div class="selection-toolbar">
+          <label><input id="select-visible-runs" type="checkbox"> <span data-i18n="action.selectVisible">Select visible</span></label>
+          <button id="delete-selected-button" class="button danger" type="button" disabled data-i18n="action.deleteSelected">
+            Delete selected
+          </button>
+        </div>
         <div id="run-list" class="run-list"></div>
         <button
           id="load-more-button"
@@ -111,10 +123,14 @@
               <span id="run-id" class="mono subtle"></span>
             </div>
             <h2 id="run-goal" tabindex="-1"></h2>
+            <p id="run-original-goal" class="run-original-goal" hidden></p>
             <p id="run-workspace" class="mono subtle path-text"></p>
           </div>
           <div class="run-action-stack">
             <div class="run-actions">
+              <button id="rename-button" class="button secondary" type="button" data-i18n="action.renameRun">
+                Rename
+              </button>
               <button id="cancel-button" class="button danger" type="button" data-i18n="action.cancelRun">
                 Cancel run
               </button>
@@ -302,6 +318,75 @@
       </div>
     </form>
   </dialog>
+
+  <dialog id="start-run-dialog" class="wide-dialog">
+    <form id="start-run-form" class="dialog-content settings-form">
+      <p class="eyebrow" data-i18n="dialog.newRun">NEW RUN</p>
+      <h2 data-i18n="dialog.startRunTitle">Start AgentBraid run</h2>
+      <label><span data-i18n="control.workspace">Workspace</span><select id="start-workspace" required></select></label>
+      <label class="full-span"><span data-i18n="form.goal">Goal</span><textarea id="start-goal" rows="5" maxlength="50000" required placeholder="Inspect README.md in this repository and report the project name and purpose." data-i18n-placeholder="form.goalPlaceholder"></textarea></label>
+      <label class="full-span"><span data-i18n="form.constraints">Constraints (one per line)</span><textarea id="start-constraints" rows="3" placeholder="Keep it read-only&#10;Do not edit files" data-i18n-placeholder="form.constraintsPlaceholder"></textarea></label>
+      <label><span data-i18n="form.codexModel">Codex model</span><input id="start-codex-model" list="codex-model-options" placeholder="CLI default" data-i18n-placeholder="form.codexDefault"></label>
+      <label><span data-i18n="form.hostModel">AGY model label</span><input id="start-host-model" list="host-model-options" value="antigravity-auto"></label>
+      <label><span data-i18n="form.routingMode">Routing</span><select id="start-routing"><option value="hybrid">Hybrid</option><option value="codex_only">Codex-only</option></select></label>
+      <label><span data-i18n="form.deliveryMode">Delivery</span><select id="start-delivery"><option value="integration_branch">Integration branch</option><option value="report_only">Report only</option></select></label>
+      <label><span data-i18n="form.workspaceMode">Workspace access</span><select id="start-workspace-mode"><option value="worktree_write">Isolated worktree writes</option><option value="read_only">Read-only</option></select></label>
+      <label><span data-i18n="form.parallel">Parallel Codex</span><input id="start-parallel" type="number" min="1" max="8" value="1"></label>
+      <label><span data-i18n="form.attempts">Task attempts</span><input id="start-attempts" type="number" min="1" max="3" value="2"></label>
+      <label><span data-i18n="form.timeout">Timeout seconds</span><input id="start-timeout" type="number" min="60" max="7200" value="1800"></label>
+      <label><span data-i18n="form.outputBytes">Max output bytes</span><input id="start-output-bytes" type="number" min="1048576" max="104857600" value="10485760"></label>
+      <label class="checkbox-field full-span"><input id="start-save-defaults" type="checkbox"> <span data-i18n="form.saveDefaults">Save as workspace defaults</span></label>
+      <p class="note full-span" data-i18n="form.hostBoundary">AGY model is informational; choose the actual model in AGY.</p>
+      <div class="dialog-actions full-span"><button id="close-start-run" class="button secondary" type="button" data-i18n="action.close">Close</button><button class="button primary" type="submit" data-i18n="action.startRun">Start run</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="wide-dialog">
+    <form id="settings-form" class="dialog-content settings-form">
+      <p class="eyebrow" data-i18n="dialog.settings">WORKSPACE SETTINGS</p>
+      <h2 data-i18n="dialog.settingsTitle">Workspace settings</h2>
+      <label class="full-span"><span data-i18n="control.workspace">Workspace</span><select id="settings-workspace" required></select></label>
+      <label><span data-i18n="form.codexModel">Codex model</span><input id="settings-codex-model" list="codex-model-options"></label>
+      <label><span data-i18n="form.hostModel">AGY model label</span><input id="settings-host-model" list="host-model-options"></label>
+      <label><span data-i18n="form.routingMode">Routing</span><select id="settings-routing"><option value="hybrid">Hybrid</option><option value="codex_only">Codex-only</option></select></label>
+      <label><span data-i18n="form.deliveryMode">Delivery</span><select id="settings-delivery"><option value="integration_branch">Integration branch</option><option value="report_only">Report only</option></select></label>
+      <label><span data-i18n="form.workspaceMode">Workspace access</span><select id="settings-workspace-mode"><option value="worktree_write">Isolated worktree writes</option><option value="read_only">Read-only</option></select></label>
+      <label><span data-i18n="form.parallel">Parallel Codex</span><input id="settings-parallel" type="number" min="1" max="8"></label>
+      <label><span data-i18n="form.attempts">Task attempts</span><input id="settings-attempts" type="number" min="1" max="3"></label>
+      <label><span data-i18n="form.timeout">Timeout seconds</span><input id="settings-timeout" type="number" min="60" max="7200"></label>
+      <label><span data-i18n="form.outputBytes">Max output bytes</span><input id="settings-output-bytes" type="number" min="1048576" max="104857600"></label>
+      <label class="full-span"><span data-i18n="form.codexBinary">Codex binary (restart required)</span><input id="settings-codex-binary"></label>
+      <label class="full-span"><span data-i18n="form.worktreeDir">Worktree directory (restart required)</span><input id="settings-worktree-dir"></label>
+      <label><span data-i18n="form.databasePath">Database path (read-only)</span><input id="settings-database-path" readonly></label>
+      <label><span data-i18n="form.stateDir">State directory (read-only)</span><input id="settings-state-dir" readonly></label>
+      <p class="note full-span" data-i18n="form.hostBoundary">AGY model is informational; choose the actual model in AGY.</p>
+      <p id="settings-restart-note" class="message full-span" hidden data-i18n="form.restartRequired">Restart Dashboard and MCP to apply runtime changes.</p>
+      <div class="dialog-actions full-span"><button id="close-settings" class="button secondary" type="button" data-i18n="action.close">Close</button><button class="button primary" type="submit" data-i18n="action.save">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="rename-dialog">
+    <form id="rename-form" class="dialog-content">
+      <p class="eyebrow" data-i18n="dialog.rename">RUN NAMES</p><h2 data-i18n="dialog.renameTitle">Edit localized run names</h2>
+      <label><span>English</span><input id="rename-en" maxlength="100" required></label>
+      <label><span>繁體中文</span><input id="rename-zh-tw" maxlength="100" required></label>
+      <label><span>简体中文</span><input id="rename-zh-cn" maxlength="100" required></label>
+      <div class="dialog-actions"><button id="close-rename" class="button secondary" type="button" data-i18n="action.close">Close</button><button class="button primary" type="submit" data-i18n="action.save">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="delete-dialog" class="wide-dialog">
+    <form id="delete-form" class="dialog-content">
+      <p class="eyebrow" data-i18n="dialog.destructive">DESTRUCTIVE ACTION</p><h2 data-i18n="dialog.deleteTitle">Delete selected run records?</h2>
+      <p data-i18n="dialog.deleteDescription">Database records and safely removable managed worktrees and branches are deleted together. Dirty or unique work is preserved.</p>
+      <div id="delete-preview" class="cleanup-preview"></div>
+      <label class="confirmation-field"><span><span data-i18n="dialog.type">Type</span> <code>delete-selected-runs</code> <span data-i18n="dialog.toConfirm">to confirm</span></span><input id="delete-confirmation" autocomplete="off" spellcheck="false"></label>
+      <div class="dialog-actions"><button id="close-delete" class="button secondary" type="button" data-i18n="action.close">Close</button><button id="confirm-delete" class="button danger" type="submit" disabled data-i18n="action.deleteSelected">Delete selected</button></div>
+    </form>
+  </dialog>
+
+  <datalist id="codex-model-options"></datalist>
+  <datalist id="host-model-options"></datalist>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </div>
