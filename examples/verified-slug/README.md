@@ -73,8 +73,10 @@ omit it. The recorded run explicitly selected `gpt-5.6-sol`; the portable script
 Codex default model unless `--model` is supplied. A clean-wheel replay without an explicit
 model failed during planning with `Codex authentication is unavailable`; retrying with the
 explicit recorded model failed with the same classification. The clean-wheel end-to-end
-replay therefore did not complete. This classification
-is not proof that credentials themselves were invalid. Use a model available to your account.
+replay therefore did not complete. A subsequent direct Codex invocation independently failed
+with HTTP 401 Unauthorized from the provider; no credential value is recorded here. The later
+replay is blocked on provider authentication and needs the user's official login/configuration
+repair, not a fabricated successful result. Use a model available to your account.
 This configuration adaptation means the recorded run is not evidence
 that the unmodified default configuration worked on this machine.
 
