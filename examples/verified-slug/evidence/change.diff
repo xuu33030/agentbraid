@@ -1,0 +1,34 @@
+diff --git a/slug.py b/slug.py
+index a34eedf..d7b1ab4 100644
+--- a/slug.py
++++ b/slug.py
+@@ -1,2 +1,2 @@
+ def slugify(text):
+-    return text.lower().replace(" ", "-")
++    return text.strip().lower().replace(" ", "-")
+diff --git a/test_slug.py b/test_slug.py
+index 6b6690d..c389e6f 100644
+--- a/test_slug.py
++++ b/test_slug.py
+@@ -7,6 +7,21 @@ class SlugTests(unittest.TestCase):
+     def test_lowercase_and_internal_space(self):
+         self.assertEqual(slugify("Hello World"), "hello-world")
+ 
++    def test_leading_whitespace(self):
++        self.assertEqual(slugify(" Hello"), "hello")
++
++    def test_trailing_whitespace(self):
++        self.assertEqual(slugify("Hello "), "hello")
++
++    def test_whitespace_on_both_ends(self):
++        self.assertEqual(slugify(" Hello World "), "hello-world")
++
++    def test_whitespace_only(self):
++        self.assertEqual(slugify("   "), "")
++
++    def test_empty_input(self):
++        self.assertEqual(slugify(""), "")
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

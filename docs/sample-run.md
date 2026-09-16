@@ -1,5 +1,10 @@
 # Redacted sample run
 
+For an actually executed Codex-backed workflow with red/green tests, isolated worktrees,
+review and explicit human approval, see the
+[verified whitespace-fix example](../examples/verified-slug/README.md). The sample below
+remains synthetic and serves a different purpose: schema documentation.
+
 [`../examples/redacted-run.json`](../examples/redacted-run.json) is a synthetic completed
 `RunSnapshot`. The test suite parses it with the current Pydantic schema so examples cannot drift
 silently from the MCP contract.
