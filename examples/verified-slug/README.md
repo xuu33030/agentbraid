@@ -74,11 +74,36 @@ Codex default model unless `--model` is supplied. A clean-wheel replay without a
 model failed during planning with `Codex authentication is unavailable`; retrying with the
 explicit recorded model failed with the same classification. The clean-wheel end-to-end
 replay therefore did not complete. A subsequent direct Codex invocation independently failed
-with HTTP 401 Unauthorized from the provider; no credential value is recorded here. The later
-replay is blocked on provider authentication and needs the user's official login/configuration
-repair, not a fabricated successful result. Use a model available to your account.
-This configuration adaptation means the recorded run is not evidence
+with HTTP 401 Unauthorized from the provider; no credential value is recorded here.
+Follow-up investigation found that the user's configured CLI uses a local provider, while
+`--ignore-user-config` discards that routing and attempts the default OpenAI endpoint.
+The 401 on that alternate path therefore does not establish failure of the configured provider.
+With owner authorization, removing only the incompatible experimental feature table restored
+normal config parsing; the configured provider then returned `OK` without any authentication,
+model, routing or sandbox changes. No token was copied or replaced. Users of custom providers
+should preserve their normal configuration rather than use `--ignore-user-config` as an
+authentication workaround.
+This configuration adaptation means the original recorded run is not evidence
 that the unmodified default configuration worked on this machine.
+
+## Clean-wheel replay with configured provider
+
+The follow-up replay `571c6e8890cd44a785a8c21acf7a8556` completed successfully after
+installing the same a2 wheel into another fresh environment and preserving normal Codex
+configuration. The unmodified published driver was invoked **without** `--ignore-user-config`
+and without a model override; the configured provider used `gpt-5.6-luna`.
+Planning, isolated implementation and built-in final review completed. A separate local test
+run passed all five tests, and the tracked diff changes only the two intended files. The
+primary branch remained unchanged. This replay was **not applied** and has no new human
+approval; the earlier run above retains its own actual human-approved delivery evidence.
+Provider execution left untracked bytecode in the integration worktree, so a future apply
+would first need cleanliness checks and explicit approval. An unsupported service-tier warning
+was nonfatal; no tier or model setting was changed to hide it.
+
+See [`evidence/configured-provider-replay.json`](evidence/configured-provider-replay.json)
+for the actual typed plan/results, review summary, usage, independent test output and branch
+isolation check. This successful replay resolves the previously recorded authentication-path
+blocker; it does not erase the failed attempts or claim every provider/model is supported.
 
 ## Inspect before any human approval
 
