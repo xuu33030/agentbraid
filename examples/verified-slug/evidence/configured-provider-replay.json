@@ -1,0 +1,176 @@
+{
+  "kind": "clean-wheel real-provider replay",
+  "package": "agentbraid 0.2.0a2",
+  "codex": "0.144.6",
+  "model": "gpt-5.6-luna",
+  "provider": "configured local provider (normal user config retained)",
+  "command": "python examples/verified-slug/run.py <DEMO>",
+  "run_id": "571c6e8890cd44a785a8c21acf7a8556",
+  "status": "completed",
+  "plan": {
+    "schema_version": "1.0",
+    "display_names": {
+      "en": "Slugify Whitespace Fix",
+      "zh-TW": "Slugify 空白處理修正",
+      "zh-CN": "Slugify 空白处理修复"
+    },
+    "summary": "Execute one bounded codex worktree task to add slugify whitespace regressions, capture the pre-fix unittest failure in notes, apply the minimal fix, and verify the full test suite.",
+    "tasks": [
+      {
+        "task_id": "implement-slugify-whitespace-fix",
+        "title": "Add regression tests and fix slugify whitespace",
+        "instructions": "Inspect the two existing repository files, then work sequentially in the assigned worktree: add the requested regression tests, run python3 -m unittest -v before editing slug.py, and copy that command's exact failing stdout/stderr into result.notes only. Next make the smallest compatible slug.py change, rerun python3 -m unittest -v, and record only the passing final command/output in result.validations. Keep the implementation and tests limited to the requested scope, clean up any generated artifacts if needed, and report the changed files and validation result. The automatic final lead review will inspect the diff and independently rerun the full unittest command; do not create a separate review task.",
+        "kind": "implementation",
+        "preferred_executor": "codex",
+        "mutates_workspace": true,
+        "dependencies": [],
+        "acceptance_criteria": [
+          "Modify only slug.py and test_slug.py in the assigned worktree; leave the primary workspace unchanged and do not commit, push, publish, access credentials, use the network, or add dependencies.",
+          "First add tests for leading whitespace, trailing whitespace, whitespace-only input, and empty input, without changing slug.py.",
+          "Run python3 -m unittest -v before changing slug.py. Capture the complete exact failing red output verbatim in result.notes, and put no failing command or result in result.validations.",
+          "Apply the minimal slug.py fix so leading and trailing whitespace is ignored before internal spaces are replaced with hyphens, while preserving lowercasing.",
+          "Rerun python3 -m unittest -v after the fix and record only the final passing command and output in result.validations.",
+          "Ensure the final worktree diff contains no changes outside slug.py and test_slug.py."
+        ],
+        "required_capabilities": [
+          "read and edit Python files",
+          "run python3 -m unittest -v",
+          "capture exact test output",
+          "worktree-scoped changes"
+        ],
+        "risk": "low",
+        "complexity": 2,
+        "max_attempts": 1
+      }
+    ],
+    "final_acceptance_criteria": [
+      "The primary workspace is unchanged; only the assigned worktree contains changes to slug.py and test_slug.py.",
+      "The automatic final lead review inspects the diff and independently runs python3 -m unittest -v.",
+      "The final implementation preserves lowercasing, trims leading and trailing whitespace, replaces remaining internal spaces with hyphens, and handles whitespace-only and empty inputs.",
+      "No commits, pushes, publishes, network access, credential access, dependency changes, or unrelated file changes occur."
+    ]
+  },
+  "tasks": [
+    {
+      "run_id": "571c6e8890cd44a785a8c21acf7a8556",
+      "spec": {
+        "task_id": "implement-slugify-whitespace-fix",
+        "title": "Add regression tests and fix slugify whitespace",
+        "instructions": "Inspect the two existing repository files, then work sequentially in the assigned worktree: add the requested regression tests, run python3 -m unittest -v before editing slug.py, and copy that command's exact failing stdout/stderr into result.notes only. Next make the smallest compatible slug.py change, rerun python3 -m unittest -v, and record only the passing final command/output in result.validations. Keep the implementation and tests limited to the requested scope, clean up any generated artifacts if needed, and report the changed files and validation result. The automatic final lead review will inspect the diff and independently rerun the full unittest command; do not create a separate review task.",
+        "kind": "implementation",
+        "preferred_executor": "codex",
+        "mutates_workspace": true,
+        "dependencies": [],
+        "acceptance_criteria": [
+          "Modify only slug.py and test_slug.py in the assigned worktree; leave the primary workspace unchanged and do not commit, push, publish, access credentials, use the network, or add dependencies.",
+          "First add tests for leading whitespace, trailing whitespace, whitespace-only input, and empty input, without changing slug.py.",
+          "Run python3 -m unittest -v before changing slug.py. Capture the complete exact failing red output verbatim in result.notes, and put no failing command or result in result.validations.",
+          "Apply the minimal slug.py fix so leading and trailing whitespace is ignored before internal spaces are replaced with hyphens, while preserving lowercasing.",
+          "Rerun python3 -m unittest -v after the fix and record only the final passing command and output in result.validations.",
+          "Ensure the final worktree diff contains no changes outside slug.py and test_slug.py."
+        ],
+        "required_capabilities": [
+          "read and edit Python files",
+          "run python3 -m unittest -v",
+          "capture exact test output",
+          "worktree-scoped changes"
+        ],
+        "risk": "low",
+        "complexity": 2,
+        "max_attempts": 1
+      },
+      "status": "succeeded",
+      "executor": "codex",
+      "assignment_rationale": "selected=codex; codex=-1.25[available;fit=1.30,preference=2.00,risk=0.00,availability=0.80,outcomes=0.33,latency=-0.48,capabilities=-6.00,mutation=0.80]; host=-1000.00[unavailable;fit=0.90,preference=0.00,risk=0.00,availability=0.80,outcomes=0.00,latency=-0.00,capabilities=-6.00,mutation=-0.40]; ties prefer codex for lead accountability",
+      "attempt": 1,
+      "claimed_by": "agentbraid-codex-worker",
+      "result": {
+        "outcome": "succeeded",
+        "summary": "Added four whitespace/empty-input regression tests and fixed slugify to trim outer whitespace before lowercasing and replacing internal spaces. Final diff is limited to slug.py and test_slug.py; no commit was created.",
+        "changed_files": [
+          "slug.py",
+          "test_slug.py"
+        ],
+        "validations": [
+          {
+            "command": "python3 -m unittest -v",
+            "passed": true,
+            "output": "test_empty_input (test_slug.SlugTests.test_empty_input) ... ok\ntest_leading_whitespace (test_slug.SlugTests.test_leading_whitespace) ... ok\ntest_lowercase_and_internal_space (test_slug.SlugTests.test_lowercase_and_internal_space) ... ok\ntest_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace) ... ok\ntest_whitespace_only_input (test_slug.SlugTests.test_whitespace_only_input) ... ok\n\n----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n"
+          }
+        ],
+        "notes": [
+          "test_empty_input (test_slug.SlugTests.test_empty_input) ... ok\ntest_leading_whitespace (test_slug.SlugTests.test_leading_whitespace) ... FAIL\ntest_lowercase_and_internal_space (test_slug.SlugTests.test_lowercase_and_internal_space) ... ok\ntest_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace) ... FAIL\ntest_whitespace_only_input (test_slug.SlugTests.test_whitespace_only_input) ... FAIL\n\n======================================================================\nFAIL: test_leading_whitespace (test_slug.SlugTests.test_leading_whitespace)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<WORKSPACE_ROOT>/agentbraid-configured-replay/state/worktrees/571c6e8890cd44a785a8c21acf7a8556/tasks/implement-slugify-whitespace-fix/test_slug.py\", line 11, in test_leading_whitespace\n    self.assertEqual(slugify(\"  Hello World\"), \"hello-world\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: '--hello-world' != 'hello-world'\n- --hello-world\n? --\n+ hello-world\n\n\n======================================================================\nFAIL: test_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<WORKSPACE_ROOT>/agentbraid-configured-replay/state/worktrees/571c6e8890cd44a785a8c21acf7a8556/tasks/implement-slugify-whitespace-fix/test_slug.py\", line 14, in test_trailing_whitespace\n    self.assertEqual(slugify(\"Hello World  \"), \"hello-world\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'hello-world--' != 'hello-world'\n- hello-world--\n?            --\n+ hello-world\n\n\n======================================================================\nFAIL: test_whitespace_only_input (test_slug.SlugTests.test_whitespace_only_input)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<WORKSPACE_ROOT>/agentbraid-configured-replay/state/worktrees/571c6e8890cd44a785a8c21acf7a8556/tasks/implement-slugify-whitespace-fix/test_slug.py\", line 17, in test_whitespace_only_input\n    self.assertEqual(slugify(\"   \"), \"\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^\nAssertionError: '---' != ''\n- ---\n\n\n----------------------------------------------------------------------\nRan 5 tests in 0.001s\n\nFAILED (failures=3)\n"
+        ],
+        "confidence": 1.0,
+        "error": null
+      },
+      "worktree_path": "<WORKSPACE_ROOT>/agentbraid-configured-replay/state/worktrees/571c6e8890cd44a785a8c21acf7a8556/tasks/implement-slugify-whitespace-fix",
+      "commit_sha": "2ddad3d93b10d68514ea2fb6b4264db7a45a7f98",
+      "error": null,
+      "created_at": "2026-09-16T13:02:56.273907Z",
+      "updated_at": "2026-09-16T13:05:34.610086Z"
+    }
+  ],
+  "final_summary": "Approved. The task evidence contains the requested pre-fix failures only in result.notes and only a passing unittest record in result.validations. The integration commit changes exactly slug.py and test_slug.py, the diff is minimal and clean, and the independent full test run passes all five tests.",
+  "provider_usage": [
+    {
+      "phase": "planning",
+      "executor": "codex",
+      "model": "codex-default",
+      "task_id": null,
+      "attempt": null,
+      "outcome": "succeeded",
+      "input_tokens": 147010,
+      "cached_input_tokens": 97024,
+      "output_tokens": 7119,
+      "reasoning_output_tokens": 3074,
+      "duration_seconds": 143.9230219579913,
+      "created_at": "2026-09-16T13:02:56.137908Z"
+    },
+    {
+      "phase": "task",
+      "executor": "codex",
+      "model": "codex-default",
+      "task_id": "implement-slugify-whitespace-fix",
+      "attempt": 1,
+      "outcome": "succeeded",
+      "input_tokens": 202188,
+      "cached_input_tokens": 172800,
+      "output_tokens": 7735,
+      "reasoning_output_tokens": 4514,
+      "duration_seconds": 157.96125541700167,
+      "created_at": "2026-09-16T13:05:34.371249Z"
+    },
+    {
+      "phase": "review",
+      "executor": "codex",
+      "model": "codex-default",
+      "task_id": null,
+      "attempt": null,
+      "outcome": "approved",
+      "input_tokens": 315508,
+      "cached_input_tokens": 226048,
+      "output_tokens": 14533,
+      "reasoning_output_tokens": 9047,
+      "duration_seconds": 142.98727100000542,
+      "created_at": "2026-09-16T13:07:57.667037Z"
+    }
+  ],
+  "delivery": {
+    "before": "f16971100aa3314f5b22f21552f729276928b797",
+    "after": "f16971100aa3314f5b22f21552f729276928b797",
+    "primary_unchanged": true,
+    "human_confirmation": "pending",
+    "applied": false
+  },
+  "independent_validation": {
+    "command": "python3 -B -m unittest -v",
+    "exit_code": 0,
+    "output": "test_empty_input (test_slug.SlugTests.test_empty_input) ... ok\ntest_leading_whitespace (test_slug.SlugTests.test_leading_whitespace) ... ok\ntest_lowercase_and_internal_space (test_slug.SlugTests.test_lowercase_and_internal_space) ... ok\ntest_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace) ... ok\ntest_whitespace_only_input (test_slug.SlugTests.test_whitespace_only_input) ... ok\n\n----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n"
+  },
+  "limitations": [
+    "Not applied: this replay has no separate human apply approval.",
+    "Untracked __pycache__ generated during provider execution remains; tracked diff is limited to slug.py and test_slug.py.",
+    "Normal config emits an unsupported service-tier warning and omits that tier; run still completed."
+  ]
+}
