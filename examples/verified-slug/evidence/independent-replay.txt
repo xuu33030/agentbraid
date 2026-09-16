@@ -1,0 +1,74 @@
+Independent replay: final regression tests against original then fixed implementation.
+
+RED exit=1
+test_empty_input (test_slug.SlugTests.test_empty_input) ... ok
+test_leading_whitespace (test_slug.SlugTests.test_leading_whitespace) ... FAIL
+test_lowercase_and_internal_space (test_slug.SlugTests.test_lowercase_and_internal_space) ... ok
+test_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace) ... FAIL
+test_whitespace_on_both_ends (test_slug.SlugTests.test_whitespace_on_both_ends) ... FAIL
+test_whitespace_only (test_slug.SlugTests.test_whitespace_only) ... FAIL
+
+======================================================================
+FAIL: test_leading_whitespace (test_slug.SlugTests.test_leading_whitespace)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private<TEMP_REPLAY>/test_slug.py", line 11, in test_leading_whitespace
+    self.assertEqual(slugify(" Hello"), "hello")
+AssertionError: '-hello' != 'hello'
+- -hello
+? -
++ hello
+
+
+======================================================================
+FAIL: test_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private<TEMP_REPLAY>/test_slug.py", line 14, in test_trailing_whitespace
+    self.assertEqual(slugify("Hello "), "hello")
+AssertionError: 'hello-' != 'hello'
+- hello-
+?      -
++ hello
+
+
+======================================================================
+FAIL: test_whitespace_on_both_ends (test_slug.SlugTests.test_whitespace_on_both_ends)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private<TEMP_REPLAY>/test_slug.py", line 17, in test_whitespace_on_both_ends
+    self.assertEqual(slugify(" Hello World "), "hello-world")
+AssertionError: '-hello-world-' != 'hello-world'
+- -hello-world-
+? -           -
++ hello-world
+
+
+======================================================================
+FAIL: test_whitespace_only (test_slug.SlugTests.test_whitespace_only)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private<TEMP_REPLAY>/test_slug.py", line 20, in test_whitespace_only
+    self.assertEqual(slugify("   "), "")
+AssertionError: '---' != ''
+- ---
++ 
+
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.002s
+
+FAILED (failures=4)
+
+GREEN exit=0
+test_empty_input (test_slug.SlugTests.test_empty_input) ... ok
+test_leading_whitespace (test_slug.SlugTests.test_leading_whitespace) ... ok
+test_lowercase_and_internal_space (test_slug.SlugTests.test_lowercase_and_internal_space) ... ok
+test_trailing_whitespace (test_slug.SlugTests.test_trailing_whitespace) ... ok
+test_whitespace_on_both_ends (test_slug.SlugTests.test_whitespace_on_both_ends) ... ok
+test_whitespace_only (test_slug.SlugTests.test_whitespace_only) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+OK
